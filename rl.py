@@ -1,3 +1,5 @@
+import threading
+
 import numpy as np
 import numpy.random
 import tensorflow as tf
@@ -22,28 +24,40 @@ def Last(bb):
     return tf.reshape(tf.gather(bb, size - 1), [])
 
 
+DEFAULT_OPTIONS = {
+    'clip_grad': 5.,
+    'gamma': 0.99,
+    'learning_rate': 0.0001,
+    'eps_decay': 3000,
+    'rollout': 20,
+    'threads': 1,
+}
+
+
 class ActorCritic(object):
-    def __init__(self, env, build_networks, options={'clip_grad': 5}):
+    def __init__(self, env, build_networks, options=DEFAULT_OPTIONS):
         self._env = env
+        self._env_example = env()
         self._options = options
-        state_dim = env.observation_space.shape[0]
+        state_dim = self._env_example.observation_space.shape[0]
         self._graph = tf.Graph()
+        self._threads = []
         with self._graph.as_default(), tf.device('/cpu:0'):
             self._state = tf.placeholder(tf.float32, shape=[None, state_dim], name='states')
             self._action = tf.placeholder(tf.int64, shape=[None], name='actions')
             self._reward = tf.placeholder(tf.float32, shape=[None, 1], name='rewards')
             self._done = tf.placeholder(tf.float32, shape=[1], name='done')      
 
-            self._policy_logits, self._baseline = build_networks(env, self._state)
+            self._policy_logits, self._baseline = build_networks(self._env_example, self._state)
 
-            self._discount = discounted_rewards(self._reward, options.get('gamma', 0.99),
+            self._discount = discounted_rewards(self._reward, options['gamma'],
                                                 Last(self._baseline) * (1. - self._done))
             
             self._tf_policy = tf.reshape(tf.multinomial(self._policy_logits, 1), [])
 
         
             with tf.device('/cpu:0'):
-                optimizer = tf.train.AdamOptimizer(options.get('learning_rate', 0.01))
+                optimizer = tf.train.AdamOptimizer(options['learning_rate'])
 
             advantage = tf.reshape(self._discount, [-1, 1]) - self._baseline
 
@@ -87,53 +101,72 @@ class ActorCritic(object):
         with self._graph.as_default():
             self.sess.run(tf.initialize_all_variables())
             self._writer = tf.train.SummaryWriter(
-                '/media/vertix/UHDD/tmp/tensorflow_logs/{}/{:02d}'.format(self._env.spec.id, run_id))
+                '/media/vertix/UHDD/tmp/tensorflow_logs/{}/{:02d}'.format(self._env_example.spec.id, run_id))
+            self._coord = tf.train.Coordinator()
 
     def Close(self):
+        self._coord.request_stop()
+        self._coord.join(self._threads)
         self.sess.close()
             
     def CleanPolicy(self, observation):
         return self.sess.run(self._tf_policy,
                              {self._state:
-                              observation.reshape(1, self._env.observation_space.shape[0])})
+                              observation.reshape(1, self._env_example.observation_space.shape[0])})
     
     def EpsilonGreedyPolicy(self, observation):
         epsilon = self.sess.run(self._epsilon)
         if np.random.rand() < epsilon:
-            return self._env.action_space.sample()
+            return self._env_example.action_space.sample()
         else:
             return self.CleanPolicy(observation)
 
     def Learn(self, num_steps):
-        obs = self._env.reset()
+        if any([t.is_alive() for t in self._threads]):
+            print 'At least one thread is already running!'
+            return
+
+        self._threads = [threading.Thread(target=self.LearnThread, args=(num_steps,))
+                         for _ in xrange(self._options['threads'])]
+        for t in self._threads:
+            t.start()
+        
+    def LearnThread(self, num_steps):
+        env = self._env()
+        obs = env.reset()
 
         observations, actions, rewards = [], [], []
         done = False
         episode_reward, episode_len = 0., 0.
 
-        step = self.sess.run(self._global_step)
-        while step < num_steps:
+        while not self._coord.should_stop():
             observations.append(obs)
-            act = self.EpsilonGreedyPolicy(obs)
+            act = self.CleanPolicy(obs)
+#             act = self.EpsilonGreedyPolicy(obs)
             actions.append(act)
             
-            obs, reward, done, _ = self._env.step(act)
+            obs, reward, done, _ = env.step(act)
             episode_reward += reward
             episode_len += 1.
             rewards.append(reward)
             
             if done or len(observations) >= self._options.get('rollout', 20):
+                # TODO(vertix): Use queues to run learn in parallel and not block env.
                 step = self.Update(observations, actions, rewards, done)
                 if done:
-                    obs = self._env.reset()
+                    obs = env.reset()
                     done = False
                     self._writer.add_summary(tf.Summary(value=[
                                 tf.Summary.Value(tag='Env/Rewards', simple_value=episode_reward),
                                 tf.Summary.Value(tag='Env/Length', simple_value=episode_len),                                
                             ]), step)
                     episode_reward, episode_len = 0., 0.
-                    
+
                 observations, actions, rewards = [], [], []
+            
+                if step >= num_steps:
+                    print 'Many steps!'
+                    self._coord.request_stop()
 
     def Update(self, observations, actions, rewards, done):
         feed_dict = {self._state: observations,
