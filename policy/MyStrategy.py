@@ -1,11 +1,14 @@
 from model.ActionType import ActionType
 from model.BuildingType import BuildingType
+from model.LaneType import LaneType
 from model.Game import Game
 from model.Faction import Faction
 from model.MinionType import MinionType
 from model.Move import Move
 from model.Wizard import Wizard
 from model.World import World
+
+import Actions
 
 import pdb
 import numpy as np
@@ -65,11 +68,11 @@ def EncodeBuilding(b, me):
 
 
 DEFAULT_OTHER_STATE = np.array(EncodeType('') + [
-  0., 0., # Life, max life
-  0., 0., # Mana, max mana
-  0., 0., 0., # Speed x, y, and angle
-  0., 0., 0., # Delta x, Delta y and distance
-  0., 0., 0., # Cast and vision ranges, remaining_cooldown
+    0., 0., # Life, max life
+    0., 0., # Mana, max mana
+    0., 0., 0., # Speed x, y, and angle
+    0., 0., 0., # Delta x, Delta y and distance
+    0., 0., 0., # Cast and vision ranges, remaining_cooldown
 ])
 
 
@@ -170,6 +173,14 @@ class MyStrategy:
         @type game: Game
         @type move: Move
         """
+        advance = Actions.AdvanceAction(game.map_size, LaneType.TOP)
+        my_move = advance.Act(me, world, game)
+
+        for attr in ['strafe_speed', 'turn', 'action', 'cast_angle', 'min_cast_distance',
+                     'max_cast_distance', 'status_target_id', 'skill_to_learn', 'messages']:
+            setattr(move, attr, getattr(my_move, attr))
+        return
+
         reward = world.get_my_player().score - self.last_score
         
         state = self.EncodeState(me, world, game)
