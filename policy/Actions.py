@@ -12,7 +12,7 @@ import math
 NUM_STEPS_PER_LANE = 40
 WAYPOINT_RADIUS = 30
 
-class NoAction(object):
+class NoOpAction(object):
     def Act(self, me, world, game):
         return Move()
 

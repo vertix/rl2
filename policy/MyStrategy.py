@@ -10,7 +10,6 @@ from model.World import World
 
 import Actions
 
-import pdb
 import numpy as np
 
 def EncodeFaction(their, mine):
@@ -142,6 +141,8 @@ class Policy(object):
         return Action(move)
 
 
+BATCH_SIZE = 10000
+
 class MyStrategy:
     def __init__(self):
         self.policy = Policy()
@@ -149,26 +150,22 @@ class MyStrategy:
         self.initialized = False
         self.last_state = {}
         self.last_action = -1
+
+        self.exp = {'s':[], 'a': [], 'r': [], 's1': []}
+        self.next_file_index = 0
     
     def EncodeState(self, me, world, game):
         return State(me, world, game)
-
-    def ImplementAction(self, action, move):
-        for attr in ['strafe_speed'
-                    ,'turn'
-                    ,'action'
-                    ,'cast_angle'
-                    ,'min_cast_distance'
-                    ,'max_cast_distance'
-                    ,'status_target_id'
-                    ,'skill_to_learn'
-                    ,'messages']:
-            setattr(move, attr, getattr(action.move, attr))
-
     
     def SaveExperience(self, s, a, r, s1):
-        pass
+        return
+        self.exp['s'].append(s)
+        self.exp['a'].append(a)
+        self.exp['r'].append(r)
+        self.exp['s1'].append(s1)
 
+        # if len(self.exp['s']) >= BATCH_SIZE:
+        #     np.savez('exp%d.npz', s=np.array(self.exp['s'], dtype=np.float32))
 
     def move(self, me, world, game, move):
         """
@@ -177,40 +174,39 @@ class MyStrategy:
         @type game: Game
         @type move: Move
         """
-
         lane = LaneType.TOP
 
         state = self.EncodeState(me, world, game)
         cur_state_dict = state.Get(None)
         hostile = cur_state_dict['hostile']
-        hostile = hostile[0] if hostile else None
+
+        noop = Actions.NoOpAction()
+        actions = ([Actions.FleeAction(game.map_size, lane),
+                    Actions.AdvanceAction(game.map_size, lane)] +
+                    [Actions.RangedAttack(enemy) for enemy in hostile] +
+                    [noop] * (MAX_TARGETS_NUM - len(hostile)))
 
         if me.life < 50:
-            action = Actions.FleeAction(game.map_size, lane)
+            a = 0 # FLEE
         elif hostile:
-            action = Actions.RangedAttack(hostile)
+            a = 2 # RANGE ATTACK CLOSEST
         else:
-            action = Actions.AdvanceAction(game.map_size, lane)
-
-        my_move = action.Act(me, world, game)
-
-        for attr in ['speed', 'strafe_speed', 'turn', 'action', 'cast_angle', 'min_cast_distance',
-                     'max_cast_distance', 'status_target_id', 'skill_to_learn', 'messages']:
-            setattr(move, attr, getattr(my_move, attr))
-
-        # print move.speed, move.strafe_speed, move.turn, move.action, move.cast_angle
-
-        return
+            a = 1 # ADVANCE
 
         reward = world.get_my_player().score - self.last_score
+        if reward != 0:
+            print 'REWARD: %.1f' % reward
         
         if self.initialized:
             self.SaveExperience(self.last_state, self.last_action, reward, cur_state_dict)
 
-        action = self.policy.Act(state)
-        self.ImplementAction(action, move)
+
+        my_move = actions[a].Act(me, world, game)
+        for attr in ['speed', 'strafe_speed', 'turn', 'action', 'cast_angle', 'min_cast_distance',
+                     'max_cast_distance', 'status_target_id', 'skill_to_learn', 'messages']:
+            setattr(move, attr, getattr(my_move, attr))
 
         self.last_score = world.get_my_player().score
         self.last_state = cur_state_dict
-        self.last_action = action
+        self.last_action = a
         self.initialized = True
