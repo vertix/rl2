@@ -1,3 +1,6 @@
+import re
+import os
+
 from model.ActionType import ActionType
 from model.BuildingType import BuildingType
 from model.LaneType import LaneType
@@ -89,7 +92,7 @@ class State(object):
         self.me = me
         self.world = world
         self.game = game
-    
+
     def Get(self, fields):
         result = {}
         if fields is None or 'my_base_state' in fields:
@@ -112,7 +115,7 @@ class State(object):
             for b in self.world.buildings:
                 objs = frie_objs if b.faction == self.me.faction else host_obj
                 objs.append(EncodeBuilding(b, self.me))
-            
+
             result['other_base_state'] = np.hstack([NormalizeObjects(host_obj), NormalizeObjects(frie_objs)])
 
             MAX_RADIUS = 800.
@@ -123,29 +126,28 @@ class State(object):
         return result
 
 
-class Action(object):
-    # NOOP, FLEE, PROCEED, ATTACK@X
-    def __init__(self, move):
-        self.move = move
+# class Policy(object):
+#     def Act(self, state):
+#         move = Move()
+#
+#         move.speed = state.game.wizard_forward_speed
+#         move.strafe_speed = state.game.wizard_strafe_speed
+#         move.turn = state.game.wizard_max_turn_angle
+#         move.action = ActionType.MAGIC_MISSILE
+#
+#         return Action(move)
 
 
-class Policy(object):
-    def Act(self, state):
-        move = Move()
-        
-        move.speed = state.game.wizard_forward_speed
-        move.strafe_speed = state.game.wizard_strafe_speed
-        move.turn = state.game.wizard_max_turn_angle
-        move.action = ActionType.MAGIC_MISSILE
-
-        return Action(move)
-
-
-BATCH_SIZE = 10000
+BATCH_SIZE = 1000
+WRITE_EXPERIENCE = False
 
 class MyStrategy:
     def __init__(self):
-        self.policy = Policy()
+        if WRITE_EXPERIENCE:
+            for f in os.listdir('.'):
+                if re.search(r'.*\.npz', f):
+                    os.remove(f)
+
         self.last_score = 0.
         self.initialized = False
         self.last_state = {}
@@ -153,19 +155,27 @@ class MyStrategy:
 
         self.exp = {'s':[], 'a': [], 'r': [], 's1': []}
         self.next_file_index = 0
-    
+
     def EncodeState(self, me, world, game):
         return State(me, world, game)
-    
+
     def SaveExperience(self, s, a, r, s1):
-        return
-        self.exp['s'].append(s)
+        if not WRITE_EXPERIENCE:
+            return
+        self.exp['s'].append(np.hstack([s['my_base_state'], s['other_base_state']]))
         self.exp['a'].append(a)
         self.exp['r'].append(r)
-        self.exp['s1'].append(s1)
+        self.exp['s1'].append(np.hstack([s1['my_base_state'], s1['other_base_state']]))
 
-        # if len(self.exp['s']) >= BATCH_SIZE:
-        #     np.savez('exp%d.npz', s=np.array(self.exp['s'], dtype=np.float32))
+        if len(self.exp['s']) >= BATCH_SIZE:
+            ss = np.array(self.exp['s'], dtype=np.float)
+            aa = np.array(self.exp['a'], dtype=np.int32)
+            rr = np.array(self.exp['r'], dtype=np.float)
+            ss1 = np.array(self.exp['s1'], dtype=np.float)
+            np.savez('exp%d.npz' % self.next_file_index,
+                     s=ss, a=aa, r=rr, s1=ss1)
+            self.next_file_index += 1
+            self.exp = {'s':[], 'a': [], 'r': [], 's1': []}
 
     def move(self, me, world, game, move):
         """
@@ -183,20 +193,20 @@ class MyStrategy:
         noop = Actions.NoOpAction()
         actions = ([Actions.FleeAction(game.map_size, lane),
                     Actions.AdvanceAction(game.map_size, lane)] +
-                    [Actions.RangedAttack(enemy) for enemy in hostile] +
-                    [noop] * (MAX_TARGETS_NUM - len(hostile)))
+                   [Actions.RangedAttack(enemy) for enemy in hostile] +
+                   [noop] * (MAX_TARGETS_NUM - len(hostile)))
 
         if me.life < 50:
-            a = 0 # FLEE
+            a = 0  # FLEE
         elif hostile:
-            a = 2 # RANGE ATTACK CLOSEST
+            a = 2  # RANGE ATTACK CLOSEST
         else:
-            a = 1 # ADVANCE
+            a = 1  # ADVANCE
 
         reward = world.get_my_player().score - self.last_score
         if reward != 0:
             print 'REWARD: %.1f' % reward
-        
+
         if self.initialized:
             self.SaveExperience(self.last_state, self.last_action, reward, cur_state_dict)
 
