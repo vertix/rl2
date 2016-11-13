@@ -53,6 +53,8 @@ def RushToTarget(me, target, move, game):
     angle = me.get_angle_to(*target)
     MoveTowardsAngle(angle, move)
 
+    print 'Me: (%.1f, %.1f) -> (%.1f, %.1f)' % (me.x, me.y, target[0], target[1])
+
     max_vector = [game.wizard_forward_speed, game.wizard_strafe_speed]
     optimal_angle = math.atan2(max_vector[1], max_vector[0])
 
@@ -66,8 +68,10 @@ class MoveAction(object):
         self.lane = lane
         step = map_size / NUM_STEPS_PER_LANE
         self.waypoints_by_lane = {
-            LaneType.MIDDLE: [(i * step, map_size - i * step)
-                              for i in range(1, NUM_STEPS_PER_LANE)],
+            LaneType.MIDDLE: [(step, map_size - step), (4 * step, map_size - step),
+                              (8 * step, map_size - step)] +
+                             [(i * step, map_size - i * step)
+                              for i in range(9, NUM_STEPS_PER_LANE)],
             LaneType.TOP: [(step, map_size - step)] +
                           [(2 * step, map_size - i * step) for i in range(2, NUM_STEPS_PER_LANE)] +
                           [(i * step, map_size - 2 * step) for i in range(2, NUM_STEPS_PER_LANE)],

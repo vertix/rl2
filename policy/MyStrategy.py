@@ -176,9 +176,12 @@ class MyStrategy:
         advance = Actions.AdvanceAction(game.map_size, LaneType.TOP)
         my_move = advance.Act(me, world, game)
 
-        for attr in ['strafe_speed', 'turn', 'action', 'cast_angle', 'min_cast_distance',
+        for attr in ['speed', 'strafe_speed', 'turn', 'action', 'cast_angle', 'min_cast_distance',
                      'max_cast_distance', 'status_target_id', 'skill_to_learn', 'messages']:
             setattr(move, attr, getattr(my_move, attr))
+
+        print move.speed, move.strafe_speed, move.turn
+
         return
 
         reward = world.get_my_player().score - self.last_score
