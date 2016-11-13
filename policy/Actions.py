@@ -10,7 +10,7 @@ import math
 
 
 NUM_STEPS_PER_LANE = 40
-WAYPOINT_RADIUS = 100
+WAYPOINT_RADIUS = 30
 
 class NoAction(object):
     def Act(self, me, world, game):
@@ -44,8 +44,8 @@ def GetPrevWaypoint(waypoints, me):
 
 
 def MoveTowardsAngle(angle, move):
-    move.speed = math.cos(angle) * 1000
-    move.strafe_speed = math.sin(angle) * 1000
+    move.speed = math.cos(angle) * 1000.
+    move.strafe_speed = math.sin(angle) * 1000.
 
 
 def RushToTarget(me, target, move, game):
@@ -53,7 +53,7 @@ def RushToTarget(me, target, move, game):
     angle = me.get_angle_to(*target)
     MoveTowardsAngle(angle, move)
 
-    print 'Me: (%.1f, %.1f) -> (%.1f, %.1f)' % (me.x, me.y, target[0], target[1])
+    # print 'MV: (%.1f, %.1f) -> (%.1f, %.1f)' % (me.x, me.y, target[0], target[1])
 
     max_vector = [game.wizard_forward_speed, game.wizard_strafe_speed]
     optimal_angle = math.atan2(max_vector[1], max_vector[0])
@@ -73,12 +73,15 @@ class MoveAction(object):
                              [(i * step, map_size - i * step)
                               for i in range(9, NUM_STEPS_PER_LANE)],
             LaneType.TOP: [(step, map_size - step)] +
-                          [(2 * step, map_size - i * step) for i in range(2, NUM_STEPS_PER_LANE)] +
-                          [(i * step, map_size - 2 * step) for i in range(2, NUM_STEPS_PER_LANE)],
+                          [(2 * step, map_size - i * step) for i in range(5, NUM_STEPS_PER_LANE - 2)] +
+                          [(i * step, 2 * step) for i in range(5, NUM_STEPS_PER_LANE - 2)],
             LaneType.BOTTOM: [(step, map_size - step)] +
-                             [(i * step, map_size - 2 * step) for i in range(2, NUM_STEPS_PER_LANE)] +
-                             [(2 * step, map_size - i * step) for i in range(2, NUM_STEPS_PER_LANE)]
+                             [(i * step, map_size - 2 * step) for i in range(5, NUM_STEPS_PER_LANE - 2)] +
+                             [(map_size - 2 * step, map_size - i * step) for i in range(5, NUM_STEPS_PER_LANE - 2)]
         }
+
+        # print self.waypoints_by_lane
+        # import sys; sys.exit(10)
 
 
 class FleeAction(MoveAction):
@@ -107,6 +110,7 @@ class AdvanceAction(MoveAction):
         RushToTarget(me, target, move, game)
         return move
 
+
 MISSILE_DISTANCE_ERROR = 10
 class RangedAttack(object):
     def __init__(self, target):
@@ -115,14 +119,18 @@ class RangedAttack(object):
     def Act(self, me, world, game):
         move = Move()
         move.action = ActionType.MAGIC_MISSILE
-        angle_to_target = me.get_angle_to(self.target)
+        angle_to_target = me.get_angle_to_unit(self.target)
         distance = me.get_distance_to_unit(self.target)
 
-        move.angle = angle_to_target
+        # print 'AT: (%.1f, %.1f) -> (%.1f, %.1f)' % (me.x, me.y, self.target.x, self.target.y)
+
+        move.turn = angle_to_target
         if abs(angle_to_target) > abs(math.atan2(self.target.radius, distance)):
             move.action = ActionType.NONE
 
         if distance > me.cast_range - self.target.radius + MISSILE_DISTANCE_ERROR:
             MoveTowardsAngle(angle_to_target, move)
             move.action = ActionType.NONE
+
+        return move
         # TODO(vyakunin): set min_cast_distance

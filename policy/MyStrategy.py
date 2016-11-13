@@ -45,7 +45,7 @@ def EncodeWizard(w, me):
     return np.array(EncodeType('w') + [
         w.life, w.max_life, w.mana, w.max_mana, w.speed_x, w.speed_y, w.angle,
         w.x - me.x, w.y - me.y, dist, w.cast_range,
-        w.vision_range, w.remaining_action_cooldown_ticks]), dist
+        w.vision_range, w.remaining_action_cooldown_ticks]), dist, w
 
 
 def EncodeMinion(m, me):
@@ -55,7 +55,7 @@ def EncodeMinion(m, me):
     return np.array(EncodeType(m_type) + [
         m.life, m.max_life, 0., 0., m.speed_x, m.speed_y, m.angle,
         m.x - me.x, m.y - me.y, dist, 0.,
-        m.vision_range, m.remaining_action_cooldown_ticks]), dist
+        m.vision_range, m.remaining_action_cooldown_ticks]), dist, m
 
 
 def EncodeBuilding(b, me):
@@ -64,21 +64,21 @@ def EncodeBuilding(b, me):
     return np.array(EncodeType(b_type) + [
         b.life, b.max_life, 0., 0., b.speed_x, b.speed_y, b.angle,
         b.x - me.x, b.y - me.y, dist, b.attack_range,
-        b.vision_range, b.remaining_action_cooldown_ticks]), dist
+        b.vision_range, b.remaining_action_cooldown_ticks]), dist, b
 
 
-DEFAULT_OTHER_STATE = np.array(EncodeType('') + [
+DEFAULT_OTHER_STATE = np.array([
     0., 0., # Life, max life
     0., 0., # Mana, max mana
     0., 0., 0., # Speed x, y, and angle
     0., 0., 0., # Delta x, Delta y and distance
     0., 0., 0., # Cast and vision ranges, remaining_cooldown
-])
+] + EncodeType(''))
 
 
 def NormalizeObjects(objs):
     objs = sorted(objs, key=lambda x: x[1])[:MAX_TARGETS_NUM]
-    objs = [v for v, _ in objs]
+    objs = [v for v, _, _ in objs]
     objs.extend([DEFAULT_OTHER_STATE] * (MAX_TARGETS_NUM - len(objs)))
     return np.hstack(objs)
 
@@ -99,7 +99,6 @@ class State(object):
              self.me.max_mana, self.me.angle, self.me.speed_x, self.me.speed_y,
              self.me.remaining_action_cooldown_ticks])
         if fields is None or 'other_base_state' in fields:
-            MAX_RADIUS = 1200.
             frie_objs, host_obj = [], []
             for w in self.world.wizards:
                 objs = frie_objs if w.faction == self.me.faction else host_obj
@@ -115,7 +114,12 @@ class State(object):
                 objs = frie_objs if b.faction == self.me.faction else host_obj
                 objs.append(EncodeBuilding(b, self.me))
             
-            result['other_base_state'] = np.hstack([NormalizeObjects(frie_objs), NormalizeObjects(host_obj)])
+            result['other_base_state'] = np.hstack([NormalizeObjects(host_obj), NormalizeObjects(frie_objs)])
+
+            MAX_RADIUS = 800.
+            result['hostile'] = [x for _, dist, x in sorted(host_obj, key=lambda x:x[1])
+                                 if dist < MAX_RADIUS]
+
 
         return result
 
@@ -173,26 +177,35 @@ class MyStrategy:
         @type game: Game
         @type move: Move
         """
-        advance = Actions.AdvanceAction(game.map_size, LaneType.TOP)
-        my_move = advance.Act(me, world, game)
+
+        lane = LaneType.TOP
+
+        state = self.EncodeState(me, world, game)
+        cur_state_dict = state.Get(None)
+        hostile = cur_state_dict['hostile']
+        hostile = hostile[0] if hostile else None
+
+        if me.life < 50:
+            action = Actions.FleeAction(game.map_size, lane)
+        elif hostile:
+            action = Actions.RangedAttack(hostile)
+        else:
+            action = Actions.AdvanceAction(game.map_size, lane)
+
+        my_move = action.Act(me, world, game)
 
         for attr in ['speed', 'strafe_speed', 'turn', 'action', 'cast_angle', 'min_cast_distance',
                      'max_cast_distance', 'status_target_id', 'skill_to_learn', 'messages']:
             setattr(move, attr, getattr(my_move, attr))
 
-        print move.speed, move.strafe_speed, move.turn
+        # print move.speed, move.strafe_speed, move.turn, move.action, move.cast_angle
 
         return
 
         reward = world.get_my_player().score - self.last_score
         
-        state = self.EncodeState(me, world, game)
-        cur_state_dict = state.Get(None)
         if self.initialized:
             self.SaveExperience(self.last_state, self.last_action, reward, cur_state_dict)
-
-        # print {k: v.shape for k, v in cur_state_dict.iteritems()}
-        # print list(cur_state_dict['other_base_state'])
 
         action = self.policy.Act(state)
         self.ImplementAction(action, move)
