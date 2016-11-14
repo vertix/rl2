@@ -134,17 +134,57 @@ class State(object):
         return result
 
 
-# class Policy(object):
-#     def Act(self, state):
-#         move = Move()
-#
-#         move.speed = state.game.wizard_forward_speed
-#         move.strafe_speed = state.game.wizard_strafe_speed
-#         move.turn = state.game.wizard_max_turn_angle
-#         move.action = ActionType.MAGIC_MISSILE
-#
-#         return Action(move)
+def Q(coeff, state, action):
+    return coeff[action].dot(state)
 
+
+class RemotePolicy(object):
+    def __init__(self, address, max_actions):
+        self.active = True
+        if address and zmq:
+            self.sock = zmq.Context().socket(zmq.SUB)
+            self.sock.setsockopt(zmq.SUBSCRIBE, "")
+            self.sock.connect(address)
+            import threading
+            # TODO(vertix): COLLECT THE THREAD!!!
+            self.thread = threading.Thread(target=self.Listen)
+            self.thread.start()
+        else:
+            self.sock = None
+
+        self.coeff = None
+        self.steps = 0
+        self.max_actions = max_actions
+
+    def Listen(self):
+        while self.active:
+            self.coeff = self.sock.recv_pyobj()
+            print 'Recieved coeff'
+
+    def Act(self, state_dict):
+        hostile = state_dict['hostile']
+
+        epsilon = 0.5 / (1 + self.steps / 1000.)
+        self.steps += 1 
+
+        if np.random.rand() < epsilon:
+            return np.random.choice(range(self.max_actions))
+
+        if self.coeff == None or np.random.rand() < 0.5:
+            if state_dict['my_base_state'][0] < 50:
+                return 0  # FLEE
+            elif hostile:
+                return 2  # RANGE ATTACK CLOSEST
+            else:
+                return 1  # ADVANCE
+        else:
+            state = np.hstack([state_dict['my_base_state'],
+                               state_dict['other_base_state']])
+            return np.argmax([Q(self.coeff, state, a)
+                              for a in range(self.max_actions)])
+
+
+NUM_ACTIONS = 2 + MAX_TARGETS_NUM
 
 class MyStrategy:
     def __init__(self):
@@ -155,13 +195,22 @@ class MyStrategy:
         else:
             self.sock = None
 
+        if len(sys.argv) > 2 and zmq:
+            self.policy = RemotePolicy(sys.argv[2], NUM_ACTIONS)
+        else:
+            self.policy = RemotePolicy(None, NUM_ACTIONS)
+
         self.last_score = 0.
         self.initialized = False
         self.last_state = {}
         self.last_action = -1
+        self.last_tick = None
 
         self.exp = {'s':[], 'a': [], 'r': [], 's1': []}
         self.next_file_index = 0
+
+    def __del__(self):
+        self.policy.thread.join(0.1)
 
     def EncodeState(self, me, world, game):
         return State(me, world, game)
@@ -199,20 +248,16 @@ class MyStrategy:
                    [Actions.RangedAttack(enemy) for enemy in hostile] +
                    [noop] * (MAX_TARGETS_NUM - len(hostile)))
 
-        if me.life < 50:
-            a = 0  # FLEE
-        elif hostile:
-            a = 2  # RANGE ATTACK CLOSEST
-        else:
-            a = 1  # ADVANCE
-
+        a = self.policy.Act(cur_state_dict)
         reward = world.get_my_player().score - self.last_score
+        if self.last_tick and world.tick_index - self.last_tick > 1:
+            reward = -500
+
         if reward != 0:
             print 'REWARD: %.1f' % reward
 
         if self.initialized:
             self.SaveExperience(self.last_state, self.last_action, reward, cur_state_dict)
-
 
         my_move = actions[a].Act(me, world, game)
         for attr in ['speed', 'strafe_speed', 'turn', 'action', 'cast_angle', 'min_cast_distance',
@@ -223,3 +268,4 @@ class MyStrategy:
         self.last_state = cur_state_dict
         self.last_action = a
         self.initialized = True
+        self.last_tick = world.tick_index

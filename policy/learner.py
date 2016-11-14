@@ -4,7 +4,7 @@ import sys
 import numpy as np
 import zmq
 
-GAMMA = 0.99
+GAMMA = 0.999
 LEARNING_RATE = 0.01
 
 
@@ -22,12 +22,16 @@ def V(coeff, state, max_actions):
 def main(argv):
     exp_socket_addr = argv[0]
     max_actions = int(argv[1])
+    strat_socket_addr = argv[2]
 
     print 'Totally have %d actions' % max_actions
 
     context = zmq.Context()
     sock_exp = context.socket(zmq.REP)
     sock_exp.bind(exp_socket_addr)
+
+    sock_strat = context.socket(zmq.PUB)
+    sock_strat.bind(strat_socket_addr)
 
     coeff, old_coeff = None, None
     step = 0
@@ -56,6 +60,8 @@ def main(argv):
             print '%dk steps' % (step / 1000)
             old_coeff = [c.copy() for c in coeff]
             print old_coeff
+            if step > 3900:
+                sock_strat.send_pyobj(old_coeff)
 
 
 if __name__ == "__main__":
