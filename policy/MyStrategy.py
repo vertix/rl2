@@ -1,4 +1,6 @@
+import cPickle
 import re
+import sys
 import os
 
 from model.ActionType import ActionType
@@ -10,6 +12,12 @@ from model.MinionType import MinionType
 from model.Move import Move
 from model.Wizard import Wizard
 from model.World import World
+
+try:
+    import zmq
+except ImportError:
+    print "ZMQ is not availabe"
+    zmq = None
 
 import Actions
 
@@ -138,15 +146,14 @@ class State(object):
 #         return Action(move)
 
 
-BATCH_SIZE = 1000
-WRITE_EXPERIENCE = False
-
 class MyStrategy:
     def __init__(self):
-        if WRITE_EXPERIENCE:
-            for f in os.listdir('.'):
-                if re.search(r'.*\.npz', f):
-                    os.remove(f)
+        if len(sys.argv) > 1 and zmq:
+            self.sock = zmq.Context().socket(zmq.REQ)
+            self.sock.connect(sys.argv[1])
+            print 'Connected to %s' % sys.argv[1]
+        else:
+            self.sock = None
 
         self.last_score = 0.
         self.initialized = False
@@ -160,22 +167,18 @@ class MyStrategy:
         return State(me, world, game)
 
     def SaveExperience(self, s, a, r, s1):
-        if not WRITE_EXPERIENCE:
+        if not self.sock:
             return
-        self.exp['s'].append(np.hstack([s['my_base_state'], s['other_base_state']]))
-        self.exp['a'].append(a)
-        self.exp['r'].append(r)
-        self.exp['s1'].append(np.hstack([s1['my_base_state'], s1['other_base_state']]))
 
-        if len(self.exp['s']) >= BATCH_SIZE:
-            ss = np.array(self.exp['s'], dtype=np.float)
-            aa = np.array(self.exp['a'], dtype=np.int32)
-            rr = np.array(self.exp['r'], dtype=np.float)
-            ss1 = np.array(self.exp['s1'], dtype=np.float)
-            np.savez('exp%d.npz' % self.next_file_index,
-                     s=ss, a=aa, r=rr, s1=ss1)
-            self.next_file_index += 1
-            self.exp = {'s':[], 'a': [], 'r': [], 's1': []}
+        data = {
+            's': np.hstack([s['my_base_state'], s['other_base_state']]),
+            'a': a,
+            'r': r,
+            's1': np.hstack([s1['my_base_state'], s1['other_base_state']])
+        }
+        self.sock.send_pyobj(data)
+        if self.sock.recv() != "Ok":
+            print "Error when sending experience"
 
     def move(self, me, world, game, move):
         """
