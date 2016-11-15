@@ -9,7 +9,7 @@ from model.Unit import Unit
 import math
 
 
-NUM_STEPS_PER_LANE = 40
+NUM_STEPS_PER_LANE = 20
 WAYPOINT_RADIUS = 30
 
 class NoOpAction(object):
@@ -68,21 +68,21 @@ class MoveAction(object):
         self.lane = lane
         step = map_size / NUM_STEPS_PER_LANE
         self.waypoints_by_lane = {
-            LaneType.MIDDLE: [(step, map_size - step), (4 * step, map_size - step),
-                              (8 * step, map_size - step)] +
+            LaneType.MIDDLE: [(step, map_size - step),
+                              (4 * step, map_size - step)] +
                              [(i * step, map_size - i * step)
-                              for i in range(9, NUM_STEPS_PER_LANE)],
+                              for i in range(5, NUM_STEPS_PER_LANE)],
             LaneType.TOP: [(step, map_size - step)] +
-                          [(2 * step, map_size - i * step) for i in range(5, NUM_STEPS_PER_LANE - 2)] +
-                          [(i * step, 2 * step) for i in range(5, NUM_STEPS_PER_LANE - 2)],
+                          [(step, map_size - i * step) for i in range(3, NUM_STEPS_PER_LANE - 4)] +
+                          [(i * step, step) for i in range(3, NUM_STEPS_PER_LANE - 1)],
             LaneType.BOTTOM: [(step, map_size - step)] +
-                             [(i * step, map_size - 2 * step) for i in range(5, NUM_STEPS_PER_LANE - 2)] +
-                             [(map_size - 2 * step, map_size - i * step) for i in range(5, NUM_STEPS_PER_LANE - 2)]
+                             [(i * step, map_size - step) for i in range(3, NUM_STEPS_PER_LANE - 4)] +
+                             [(map_size - step, map_size - i * step) for i in range(3, NUM_STEPS_PER_LANE - 1)]
         }
 
         # print self.waypoints_by_lane
         # import sys; sys.exit(10)
-
+        
 
 class FleeAction(MoveAction):
     def __init__(self, map_size, lane):
