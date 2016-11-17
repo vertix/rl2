@@ -5,28 +5,26 @@ from model.Move import Move
 from model.Wizard import Wizard
 from model.World import World
 from model.Unit import Unit
+from Geometry import Point
+from Geometry import BuildNextAngle
 
 import math
 
 
-NUM_STEPS_PER_LANE = 20
-WAYPOINT_RADIUS = 30
+NUM_STEPS_PER_LANE = 3
+WAYPOINT_RADIUS = 500
 
 class NoOpAction(object):
     def Act(self, me, world, game):
         return Move()
 
 
-def PointToUnit(point):
-    return Unit(0, point[0], point[1], 0, 0, 0, 0)
-
-
 def GetNextWaypoint(waypoints, me):
     last_point = waypoints[-1]
     for i, point in enumerate(waypoints):
-        if me.get_distance_to(*point) < WAYPOINT_RADIUS:
+        if me.get_distance_to_unit(point) < WAYPOINT_RADIUS:
             return min(i + 1, len(waypoints) - 1)
-        if PointToUnit(point).get_distance_to(*last_point) < me.get_distance_to(*last_point):
+        if point.GetDistanceTo(last_point) < me.get_distance_to_unit(last_point):
             return i
     return len(waypoints) - 1
 
@@ -36,9 +34,9 @@ def GetPrevWaypoint(waypoints, me):
     for i, point in reversed(list(enumerate(waypoints))):
         if i == 0:
             return 0
-        if me.get_distance_to(*point) < WAYPOINT_RADIUS:
+        if me.get_distance_to_unit(point) < WAYPOINT_RADIUS:
             return i-1
-        if PointToUnit(point).get_distance_to(*first_point) < me.get_distance_to(*first_point):
+        if point.GetDistanceTo(first_point) < me.get_distance_to_unit(first_point):
             return i
     return 0
 
@@ -48,9 +46,11 @@ def MoveTowardsAngle(angle, move):
     move.strafe_speed = math.sin(angle) * 1000.
 
 
-def RushToTarget(me, target, move, game):
+def RushToTarget(me, target, move, game, world):
+    print me.x, me.y, target
     # TODO(vyakunin): try not strafing combination
-    angle = me.get_angle_to(*target)
+    angle = BuildNextAngle(me, target, game, world)
+    print angle
     MoveTowardsAngle(angle, move)
 
     # print 'MV: (%.1f, %.1f) -> (%.1f, %.1f)' % (me.x, me.y, target[0], target[1])
@@ -68,16 +68,18 @@ class MoveAction(object):
         self.lane = lane
         step = map_size / NUM_STEPS_PER_LANE
         self.waypoints_by_lane = {
-            LaneType.MIDDLE: [(step, map_size - step),
-                              (4 * step, map_size - step)] +
-                             [(i * step, map_size - i * step)
-                              for i in range(5, NUM_STEPS_PER_LANE)],
-            LaneType.TOP: [(step, map_size - step)] +
-                          [(step, map_size - i * step) for i in range(3, NUM_STEPS_PER_LANE - 4)] +
-                          [(i * step, step) for i in range(3, NUM_STEPS_PER_LANE - 1)],
-            LaneType.BOTTOM: [(step, map_size - step)] +
-                             [(i * step, map_size - step) for i in range(3, NUM_STEPS_PER_LANE - 4)] +
-                             [(map_size - step, map_size - i * step) for i in range(3, NUM_STEPS_PER_LANE - 1)]
+            LaneType.MIDDLE: [Point(100, map_size - 100)] +
+                             [Point(i * step, map_size - i * step)
+                              for i in range(1, NUM_STEPS_PER_LANE-1)] +
+                             [Point(map_size - 100, map_size - 100)],
+            LaneType.TOP: [Point(100, map_size - 100)] +
+                          [Point(100, map_size - i * step) for i in range(1, NUM_STEPS_PER_LANE - 1)] +
+                          [Point(i * step, 100) for i in range(1, NUM_STEPS_PER_LANE - 1)] +
+                             [Point(map_size - 100, map_size - 100)],
+            LaneType.BOTTOM: [Point(100, map_size - 100)] +
+                             [Point(i * step, map_size - 100) for i in range(1, NUM_STEPS_PER_LANE - 1)] +
+                             [Point(map_size - 100, map_size - i * step) for i in range(1, NUM_STEPS_PER_LANE - 1)] +
+                             [Point(map_size - 100, map_size - 100)]
         }
 
         # print self.waypoints_by_lane
@@ -89,11 +91,12 @@ class FleeAction(MoveAction):
         MoveAction.__init__(self, map_size, lane)
 
     def Act(self, me, world, game):
+        print 'flee'
         waypoints = self.waypoints_by_lane[self.lane]
         i = GetPrevWaypoint(waypoints, me)
         target = waypoints[i]
         move = Move()
-        RushToTarget(me, target, move, game)
+        RushToTarget(me, target, move, game, world)
         return move
 
 
@@ -103,11 +106,12 @@ class AdvanceAction(MoveAction):
     
         
     def Act(self, me, world, game):
+        print 'advance'
         waypoints = self.waypoints_by_lane[self.lane]
         i = GetNextWaypoint(waypoints, me)
         target = waypoints[i]
         move = Move()
-        RushToTarget(me, target, move, game)
+        RushToTarget(me, target, move, game, world)
         return move
 
 
@@ -117,6 +121,7 @@ class RangedAttack(object):
         self.target = target
 
     def Act(self, me, world, game):
+        print 'ranged_attack'
         move = Move()
         move.action = ActionType.MAGIC_MISSILE
         angle_to_target = me.get_angle_to_unit(self.target)

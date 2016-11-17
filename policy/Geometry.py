@@ -5,8 +5,12 @@ from math import cos
 from math import sin
 from math import atan2
 from math import sqrt
+from copy import deepcopy
+from Graph import Dijkstra
+from model.CircularUnit import CircularUnit
 
 EPSILON = 1E-4
+MACRO_EPSILON = 2
 
 class Line(object):
     def __init__(self, p1, p2):
@@ -54,7 +58,7 @@ class Point(object):
         return Point(self.x * f, self.y * f)
         
     def __sub__(self, other):
-        return self + other * -1
+        return Point(self.x - other.x, self.y - other.y)
 
     def __str__(self):
         return '(x:%.6f, y:%.6f)' % (self.x, self.y)
@@ -64,9 +68,12 @@ class Point(object):
     
 
 def BuildObstacles(me, world, game):
-   obstacles = [unit.copy for unit in 
+   obstacles = [(me.get_distance_to_unit(unit), deepcopy(unit)) for unit in 
        world.wizards + world.minions + world.trees + world.buildings 
-       if me.get_distance_to_unit(unit) < me.vision_range]
+       if me.get_distance_to_unit(unit) < me.vision_range and me.id != unit.id]
+   obstacles.sort()
+   obstacles = [o for _, o in obstacles]
+   obstacles = obstacles[:15]
    # make all objects larger by error margin + my radius to be a point
    for o in obstacles:
        o.radius = o.radius + me.radius + hypot(o.speed_x, o.speed_y)
@@ -85,20 +92,22 @@ def BuildTangents(u1, u2):
     r1 = u1.radius
     r2 = u2.radius
     d = u1.get_distance_to_unit(u2)
+    u1p = Point.FromUnit(u1)
+    u2p = Point.FromUnit(u2)
     if r1 > r2:
         return [(p2, a2, p1, a1) for (p1, a1, p2, a2) in BuildTangents(u2, u1)]
     # now r1 < r2
     if abs(r2) < EPSILON:
         # both circles are points
-        return [(u1, 0, u2, 0)]
+        return [(u1p, 0, u2p, 0)]
     if r2 > d + r1 - EPSILON:
         # they are inside each other
         return []
     result = []
     # vector from center1 to point on circle1 closest to circle2
-    v1 = Point((u2.x - u1.x) * r1 / d, (u2.y - u1.y) * r1 / d)
+    v1 = (u2p - u1p) * (r1 / d)
     # same but for circle2
-    v2 = Point((u1.x - u2.x) * r2 / d, (u1.y - u2.y) * r2 / d)    
+    v2 = (u1p - u2p) * (r2 / d)
     # calculating outer tangents
     alpha2 = acos((r2 - r1) / d)
     alpha1 = pi - alpha2
@@ -118,28 +127,31 @@ def BuildTangents(u1, u2):
     
 
 def SegmentCrossesCircle(p1, p2, o):
+    if (o.radius < EPSILON):
+        return False
     op = Point.FromUnit(o)
     if op.GetDistanceTo(p1) < o.radius - EPSILON or op.GetDistanceTo(p2) < o.radius:
-        print 1
+        # print 1
         return True
     if p1.GetDistanceTo(p2) < EPSILON:
         return False
     line = Line(p1, p2)
-    print line
-    print op.GetDistanceToLine(line)
+    # print line
+#     print op.GetDistanceToLine(line)
     if op.GetDistanceToLine(line) > o.radius - EPSILON:
         return False
     return (op - p1).ScalarMul(p2 - p1) * (op - p2).ScalarMul(p1 - p2) > 0
     
 
 def SegmentClearFromObstacles(p1, p2, obstacles):
+    # import pdb; pdb.set_trace()
     for o in obstacles:
         if SegmentCrossesCircle(p1, p2, o):
             return False
     return True
     
-# returns ([p1, p2], [(a1, a2), (b1, b2)]) or None, where pX – points, aX – corresponding
-# angles on c1, bX – corresponding angles on c2 intersection goes from a1 to a2 in positive
+# returns ([p1, p2], [(a1, a2), (b1, b2)]) or None, where pX - points, aX - corresponding
+# angles on c1, bX - corresponding angles on c2 intersection goes from a1 to a2 in positive
 # direction on c1 and in negative on c2.
 def IntersectCircles(c1, c2):
     d = c1.get_distance_to_unit(c2)
@@ -159,10 +171,15 @@ def IntersectCircles(c1, c2):
     p1 = p0 - delta
     p2 = p0 + delta
     
+    assert abs(p1.GetDistanceTo(c1p) - c1.radius) < EPSILON
+    assert abs(p2.GetDistanceTo(c1p) - c1.radius) < EPSILON
+    assert abs(p1.GetDistanceTo(c2p) - c2.radius) < EPSILON
+    assert abs(p2.GetDistanceTo(c2p) - c2.radius) < EPSILON
+    
     return ([p1, p2], [((p1 - c1p).GetAngle(), (p2 - c1p).GetAngle()), 
                        ((p1 - c2p).GetAngle(), (p2 - c2p).GetAngle())])
                        
-# a1, a2 – starting and ending angles for arc, i1 and i2 – corresponding point numbers,
+# a1, a2 - starting and ending angles for arc, i1 and i2 - corresponding point numbers,
 # returns [(-pi <= alpha < pi, type, point_no)...],
 # type is 1 for beginning of intersection and -1 for end of intersection. point_no = -1 
 # means fake point.
@@ -172,65 +189,145 @@ def AddArc(a1, a2, i1, i2):
         return [(a1, 1, i1), (pi, -1, -1), (-pi, 1, -1), (a2, -1, i2)]
     return [(a1, 1, i1), (a2, -1, i2)]
     
-def AddEdge(i1, i2, d, g):
-    g[i1].append(i2, d)
-    g[i2].append(i1, d)
+def Invalid(p, world):
+    r = world.wizards[0].radius
+    return p.x < r or p.x > world.width - r or p.y < r or p.y > world.height - r
+
+def AddEdge(points, world, i1, i2, d, g, is_arc=False, circle=None):
+    if Invalid(points[i1], world) or Invalid(points[i2], world):
+        return
+    g[i1].append((i2, d, is_arc, circle))
+    g[i2].append((i1, d, is_arc, circle))
+    if points[i1].GetDistanceTo(points[i2]) > d:
+        print "WHHWAAAAAA %d %d %f" % (i1, i2, d)
+        print points[i1]
+        print points[i2]
+        print is_arc
+        print circle.x
+        print circle.y
+        print circle.radius
+    
+def GetArcLength(a1, a2, r):
+    # print r
+#     print a1
+#     print a2
+    return abs(a1 - a2) * r
+    
     
 # target = (x, y)
 # units = list(CircularUnit)
 # TODO(vyakunin): decide on a better interface
 # returns [(point, previous_point_no, shortest_distance)], points_per_unit: list(list(int)))
-def FindOptimalPaths(me, units):
-   target = CircularUnit(id=0, x=target[0], y=target[1],
-                         speed_x=0, speed_y=0, angle=0, faction=0, radius=0)
-   me_point = Point.FromUnit(me)
-   me_point.radius = 0
-   
-   all_units = [me_point] + units
-   # points[i]: Point
-   points = []
-   # graph[point_no_i]: [(point_no_j, direct_distance_i_to_j), ...]}
-   graph = [[]] * len(all_units)
-   
-   # points_per_unit[unit_no_i]: [(-pi <= alpha < pi, type, point_no)...],
-   # type is 1 for beginning of intersection, 0 for regular point and -1 for end of 
-   # intersection.
-   points_per_unit = [[]] * len(all_units)
-   for i, u1 in enumerate(all_units):
-       for j, u2 in enumerate(all_units[i:]):
-           j = i+j
-           tangents = BuildTangents(u1, u2)
-           for p1, a1, p2, a2 in tangents:
-               if SegmentClearFromObstacles(p1, p2, obstacles):
-                   i1 = len(points)
-                   i2 = i1 + 1
-                   points.append(p1)
-                   points.append(p2)
-                   points_per_unit[i].append((a1, 0, i1))
-                   points_per_unit[j].append((a2, 0, i2))
-                   distance = GetDistance(p1, p2)
-                   AddEdge(i1, i2, distance, graph)
-            
-           intersections = IntersectCircles(u1, u2)
-           if intersections is None:
+def FindOptimalPaths(me, units, world):
+    me_point = deepcopy(me)
+    me_point.radius = 0
+    # import pdb; pdb.set_trace()
+    all_units = [me_point] + units
+    # points[i]: Point
+    points = []
+    # graph[point_no_i]: [(point_no_j, direct_distance_i_to_j), ...]}
+    graph = []
+
+    # points_per_unit[unit_no_i]: [(-pi <= alpha < pi, type, point_no)...],
+    # type is 1 for beginning of intersection, 0 for regular point and -1 for end of 
+    # intersection.
+    points_per_unit = []
+    for i in range(len(all_units)):
+        points_per_unit.append([])
+    for i, u1 in enumerate(all_units):
+        for j, u2 in enumerate(all_units[i+1:]):
+            j += i + 1
+            tangents = BuildTangents(u1, u2)
+            for p1, a1, p2, a2 in tangents:
+                if SegmentClearFromObstacles(p1, p2, all_units):
+                    i1 = len(points)
+                    i2 = i1 + 1
+                    points.append(p1)
+                    points.append(p2)
+                    graph.append([])
+                    graph.append([])    
+                    # if i1 == 11 or i2 == 11:
+                    #     import pdb; pdb.set_trace()
+                    points_per_unit[i].append((a1, 0, i1))
+                    points_per_unit[j].append((a2, 0, i2))
+                    distance = p1.GetDistanceTo(p2)
+                    # print 'distance: ' + str(p1) + str(p2) + str(distance)
+                    AddEdge(points, world, i1, i2, distance, graph)
+
+            intersections = IntersectCircles(u1, u2)
+            if intersections is None:
                continue
-           p, a = intersections
-           i1 = len(points)
-           i2 = i1 + 1
-           points.extend(p)
-           points_per_unit[i].extend(AddArc(a[0][0], a[0][1], i1, i2))
-           points_per_unit[j].extend(AddArc(a[1][1], a[1][0], i2, i1))
+            p, a = intersections
+            i1 = len(points)
+            i2 = i1 + 1
+            points.extend(p)
+            graph.append([])
+            graph.append([])
+            points_per_unit[i].extend(AddArc(a[0][0], a[0][1], i1, i2))
+            points_per_unit[j].extend(AddArc(a[1][1], a[1][0], i2, i1))
     for unit_index, p in enumerate(points_per_unit):
+        u = all_units[unit_index]
         p.sort()
         for i in range(len(p)):
+            # if p[i-1][2] == 11 or p[i][2] == 11:
+#                 import pdb; pdb.set_trace()
             # only add arc edges not passing intersection arcs. Keep those
             # inside intersections isolated from those outside, so they are unreachable.
             if p[i-1][1] == 0 and p[i][1] == 0:
-                AddEdge(p[i-1][2], p[i][2], 
-                        GetArcLength(p[i-1][0], p[i][0], 
-                                     all_units[unit_index].radius),
-                        graph)
+                AddEdge(points, world, p[i-1][2], p[i][2], 
+                        GetArcLength(p[i-1][0], p[i][0], all_units[unit_index].radius),
+                        graph, is_arc=True, circle=u)
         # leave just list of point numbers
         points_per_unit[unit_index] = [k for _, __, k in p if k != -1]
     optimal_distances, previous_points = Dijkstra(graph)
-    return (zip(points, previous_points, optimal_distances), points_per_unit)
+    return (points, previous_points, optimal_distances, points_per_unit)
+    
+def CloseEnough(me, t, prev, points):
+    if prev[1]:
+        # import pdb; pdb.set_trace()
+        return abs(me.get_distance_to_unit(prev[2]) - prev[2].radius) < MACRO_EPSILON
+    # import pdb; pdb.set_trace()
+    return abs(me.get_distance_to_unit(points[t]) + me.get_distance_to_unit(points[prev[0]]) - 
+        points[t].GetDistanceTo(points[prev[0]])) < MACRO_EPSILON
+        
+def BuildPathAngle(me, t, path, p):
+    if not path[1]:
+        return me.get_angle_to_unit(p[t])
+    c = path[2]
+    me_p = Point.FromUnit(me)
+    v_to_c = Point.FromUnit(c) - me_p
+    v_to_t = p[t] - me_p
+    c1 = v_to_c.Rotate(pi/2)
+    if c1.ScalarMul(v_to_t) > 0:
+        # import pdb; pdb.set_trace()
+        return c1.GetAngle() - me.angle
+    c2 = v_to_c.Rotate(-pi/2)
+    return c2.GetAngle() - me.angle
+    
+def BuildNextAngle(me, target, game, world):
+    obstacles = BuildObstacles(me, world, game)
+    target = CircularUnit(0, target.x, target.y, 0, 0, 0, 0, 0)
+    p, prev, d, points_per_unit = FindOptimalPaths(
+        me, [target] + obstacles, world)
+    # import pdb; pdb.set_trace()
+    t_id = -1
+    min_d = 1e6
+    for ps in points_per_unit[1]:
+        if t_id == -1 or d[ps] < min_d:
+            min_d = d[ps]
+            t_id = ps
+    if t_id == -1:
+        # import pdb; pdb.set_trace()
+        print 'no way to ' + str(target)
+        return 0.0
+    path = prev[t_id]
+    while prev[t_id][0] != -1 and not CloseEnough(me, t_id, prev[t_id], p):
+        path = prev[t_id]        
+        t_id = prev[t_id][0]
+
+    if path[0] == -1:
+        # import pdb; pdb.set_trace()
+        print 'no way to ' + str(target)        
+        return 0.0
+        
+    return BuildPathAngle(me, t_id, path, p)
