@@ -11,7 +11,8 @@ from model.CircularUnit import CircularUnit
 
 EPSILON = 1E-4
 MACRO_EPSILON = 2
-MAX_OBSTACLES = 10
+MAX_OBSTACLES = 15
+TARGET_EXTRA_SPACE = 50
 
 class Line(object):
     def __init__(self, p1, p2):
@@ -62,7 +63,7 @@ class Point(object):
         return Point(self.x - other.x, self.y - other.y)
 
     def __str__(self):
-        return '(x:%.6f, y:%.6f)' % (self.x, self.y)
+        return 'Point(%.3f, %.3f)' % (self.x, self.y)
     
     def __repr__(self):
         return self.__str__()
@@ -361,14 +362,16 @@ def BuildPathAngle(me, path):
 def BuildPath(me, target, game, world):
     obstacles = BuildObstacles(me, world, game)
     target = CircularUnit(0, target.x, target.y, 0, 0, 0, 0, 0)
-    obstacles = [o for o in obstacles if o.get_distance_to_unit(target) > o.radius + EPSILON]
+    obstacles = [o for o in obstacles if o.get_distance_to_unit(target) > 
+                                         o.radius + me.radius + TARGET_EXTRA_SPACE]
     p, prev, d, points_per_unit = FindOptimalPaths(
         me, [target] + obstacles, world)
+    # print obstacles
     # print 'points:'
-#     print p
-#     print 'prev:'
-#     print prev
-#     print 'optimal_distances:'
+    # print p
+    # print 'prev:'
+    # print prev
+    # print 'optimal_distances:'
     # print d
     
     # import pdb; pdb.set_trace()

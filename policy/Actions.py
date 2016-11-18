@@ -15,10 +15,12 @@ from copy import deepcopy
 import math
 
 
-NUM_STEPS_PER_LANE = 3
-WAYPOINT_RADIUS = 500
-GRAPH_COOLDOWN = 20
+NUM_STEPS_PER_LANE = 6
+WAYPOINT_RADIUS = 300 # must be less than distance between waypoints!
+GRAPH_COOLDOWN = 30
+TARGET_COOLDOWN = 60
 MISSILE_DISTANCE_ERROR = 10
+MARGIN = 200
 
 
 class NoOpAction(object):
@@ -27,6 +29,7 @@ class NoOpAction(object):
 
 
 def GetNextWaypoint(waypoints, me):
+    # import pdb; pdb.set_trace()
     last_point = waypoints[-1]
     for i, point in enumerate(waypoints):
         if me.get_distance_to_unit(point) < WAYPOINT_RADIUS:
@@ -57,31 +60,35 @@ class MoveAction(object):
     def __init__(self, map_size, lane):
            self.lane = lane
            step = map_size / NUM_STEPS_PER_LANE
-           start = Point(100, map_size - 100)
-           end = Point(map_size - 100, 100)
+           start = Point(MARGIN, map_size - MARGIN)
+           end = Point(map_size - MARGIN, MARGIN)
            self.waypoints_by_lane = {
                LaneType.MIDDLE: [Point(i * step, map_size - i * step)
                                  for i in range(1, NUM_STEPS_PER_LANE - 1)],
-               LaneType.TOP: [Point(100, map_size - i * step) for i in range(1, NUM_STEPS_PER_LANE - 1)] +
-                             [Point(i * step, 100) for i in range(1, NUM_STEPS_PER_LANE - 1)],
-               LaneType.BOTTOM: [Point(i * step, map_size - 100) for i in range(1, NUM_STEPS_PER_LANE - 1)] +
-                                [Point(map_size - 100, map_size - i * step) for i in range(1, NUM_STEPS_PER_LANE - 1)]
+               LaneType.TOP: [Point(MARGIN, map_size - i * step) for i in range(1, NUM_STEPS_PER_LANE - 1)] +
+                             [Point(i * step, MARGIN) for i in range(1, NUM_STEPS_PER_LANE - 1)],
+               LaneType.BOTTOM: [Point(i * step, map_size - MARGIN) for i in range(1, NUM_STEPS_PER_LANE - 1)] +
+                                [Point(map_size - MARGIN, map_size - i * step) for i in range(1, NUM_STEPS_PER_LANE - 1)]
            }
        
            for key in self.waypoints_by_lane:
                self.waypoints_by_lane[key] = [start] + self.waypoints_by_lane[key] + [end]
                
            self.last_graph_updated = -GRAPH_COOLDOWN
+           self.last_target = -TARGET_COOLDOWN
+           self.focus_target = None
+           self.path = None
 
         # print self.waypoints_by_lane
         # import sys; sys.exit(10)
         
     def RushToTarget(self, me, target, move, game, world):
         # print me.x, me.y, target
-        if self.last_graph_updated + GRAPH_COOLDOWN <= game.tick_count:
+        if (self.path is None) or (self.last_graph_updated + GRAPH_COOLDOWN <= world.tick_index):
             self.path = BuildPath(me, target, game, world)
-            self.last_graph_updated = game.tick_count
-    
+            self.last_graph_updated = world.tick_index
+            # print world.tick_index
+        # print self.path
         if self.path is None: 
             angle = me.get_angle_to_unit(target)
         else:
@@ -112,13 +119,21 @@ class MoveAction(object):
     def MakeAdvanceMove(self, me, world, game, move):
         waypoints = self.waypoints_by_lane[self.lane]
         i = GetNextWaypoint(waypoints, me)
+        # print i, waypoints[i]
         target = waypoints[i]
         self.RushToTarget(me, target, move, game, world)
         
     def MakeMissileMove(self, me, world, game, move, target=None):
         t = deepcopy(target)
         if t is None:
-            t = PickTarget(me, world, game)
+            if (self.focus_target != None) and (world.tick_index < self.last_target + TARGET_COOLDOWN):
+                t = self.focus_target
+            else:
+                t = PickTarget(me, world, game)
+                self.focus_target = t
+                self.last_target = world.tick_index
+                # print world.tick_index
+                # print t
         if t is None:
             return
         # print t.id, t.x, t.y
@@ -149,12 +164,23 @@ class FleeAction(MoveAction):
         print 'flee'
         move = Move()
         aggro = GetAggro(me, game, world)
-        print aggro
+        # print # aggro
+        target = None
+        target = PickTarget(me, world, game)
         if aggro > 0:
+            print 'really flee'
             self.MakeFleeMove(me, world, game, move)
+        elif (target is not None) and (
+            # we have to be able to comfortably attack
+            target.get_distance_to_unit(me) - target.radius < 
+            me.cast_range - 2 * target.radius):
+            print 'really flee'
+            self.MakeFleeMove(me, world, game, move) 
         else:
+            print 'ruuuush'
             self.MakeAdvanceMove(me, world, game, move) 
-        self.MakeMissileMove(me, world, game, move)
+                
+        self.MakeMissileMove(me, world, game, move, target)
         return move
 
 
@@ -164,7 +190,7 @@ class AdvanceAction(MoveAction):
     
         
     def Act(self, me, world, game):
-        print 'advance'
+        # print 'advance'
         move = Move()
         self.MakeAdvanceMove(me, world, game, move)
         self.MakeMissileMove(me, world, game, move)
@@ -179,10 +205,10 @@ class RangedAttack(MoveAction):
     def Act(self, me, world, game):
         print 'ranged_attack'
         move = Move()
-        self.MakeMissileMove(me, world, game, move, self.target)
+        self.MakeMissileMove(me, world, game, move)
             
-        if (me.get_distance_to_unit(self.target) > 
-            me.cast_range - self.target.radius + MISSILE_DISTANCE_ERROR):
+        if (self.focus_target is not None) and (me.get_distance_to_unit(self.focus_target) > 
+            me.cast_range - self.focus_target.radius + MISSILE_DISTANCE_ERROR):
             # import pdb; pdb.set_trace()
-            self.RushToTarget(me, self.target, move, game, world)
+            self.RushToTarget(me, self.focus_target, move, game, world)
         return move

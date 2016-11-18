@@ -172,10 +172,12 @@ class RemotePolicy(object):
 
         if self.coeff == None or np.random.rand() < 0.5:
             if state_dict['my_base_state'][0] < 50:
+                # print 'FLEE'
                 return 0  # FLEE
             elif hostile:
                 return 2  # RANGE ATTACK CLOSEST
             else:
+                # print 'ADVANCE'
                 return 1  # ADVANCE
         else:
             state = np.hstack([state_dict['my_base_state'],
@@ -208,6 +210,9 @@ class MyStrategy:
 
         self.exp = {'s':[], 'a': [], 'r': [], 's1': []}
         self.next_file_index = 0
+        self.flee_action = None
+        self.advance_action = None
+        self.lane = None
 
     def __del__(self):
         self.policy.thread.join(0.1)
@@ -236,15 +241,20 @@ class MyStrategy:
         @type game: Game
         @type move: Move
         """
-        lane = LaneType.MIDDLE
+        if self.flee_action is None:
+            self.lane = LaneType.TOP
+            self.flee_action = Actions.FleeAction(game.map_size, self.lane)
+            self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
+            
+        lane = self.lane
 
         state = self.EncodeState(me, world, game)
         cur_state_dict = state.Get(None)
         hostile = cur_state_dict['hostile']
 
         noop = Actions.NoOpAction()
-        actions = ([Actions.FleeAction(game.map_size, lane),
-                    Actions.AdvanceAction(game.map_size, lane)] +
+        actions = ([self.flee_action,
+                    self.advance_action] +
                    [Actions.RangedAttack(game.map_size, lane, enemy) for enemy in hostile] +
                    [noop] * (MAX_TARGETS_NUM - len(hostile)))
 
