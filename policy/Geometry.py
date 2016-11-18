@@ -11,6 +11,7 @@ from model.CircularUnit import CircularUnit
 
 EPSILON = 1E-4
 MACRO_EPSILON = 2
+MAX_OBSTACLES = 10
 
 class Line(object):
     def __init__(self, p1, p2):
@@ -73,10 +74,8 @@ def BuildObstacles(me, world, game):
        if me.get_distance_to_unit(unit) < me.vision_range and me.id != unit.id]
    obstacles.sort()
    obstacles = [o for _, o in obstacles]
-   obstacles = obstacles[:15]
+   obstacles = obstacles[:MAX_OBSTACLES]
    # make all objects larger by error margin + my radius to be a point
-   for o in obstacles:
-       o.radius = o.radius + me.radius + hypot(o.speed_x, o.speed_y)
    return obstacles
 
 
@@ -130,7 +129,7 @@ def SegmentCrossesCircle(p1, p2, o):
     if (o.radius < EPSILON):
         return False
     op = Point.FromUnit(o)
-    if op.GetDistanceTo(p1) < o.radius - EPSILON or op.GetDistanceTo(p2) < o.radius:
+    if op.GetDistanceTo(p1) < o.radius - EPSILON or op.GetDistanceTo(p2) < o.radius - EPSILON:
         # print 1
         return True
     if p1.GetDistanceTo(p2) < EPSILON:
@@ -144,9 +143,9 @@ def SegmentCrossesCircle(p1, p2, o):
     
 
 def SegmentClearFromObstacles(p1, p2, obstacles):
-    # import pdb; pdb.set_trace()
     for o in obstacles:
         if SegmentCrossesCircle(p1, p2, o):
+            # import pdb; pdb.set_trace()
             return False
     return True
     
@@ -198,7 +197,11 @@ def AddEdge(points, world, i1, i2, d, g, is_arc=False, circle=None):
         return
     g[i1].append((i2, d, is_arc, circle))
     g[i2].append((i1, d, is_arc, circle))
-    if points[i1].GetDistanceTo(points[i2]) > d:
+    if d < 0:
+        print "ALARM"
+        # import pdb; pdb.set_trace()
+        
+    if points[i1].GetDistanceTo(points[i2]) > d + EPSILON:
         print "WHHWAAAAAA %d %d %f" % (i1, i2, d)
         print points[i1]
         print points[i2]
@@ -209,11 +212,24 @@ def AddEdge(points, world, i1, i2, d, g, is_arc=False, circle=None):
     
 def GetArcLength(a1, a2, r):
     # print r
-#     print a1
-#     print a2
+    # print a1
+    # print a2
     return abs(a1 - a2) * r
     
-    
+def Downcast(ancestor, descendent):
+    """
+        automatic downcast conversion.....
+
+        (NOTE - not type-safe -
+        if ancestor isn't a super class of descendent, it may well break)
+
+    """
+    for name, value in vars(ancestor).iteritems():
+        #print "setting descendent", name, ": ", value, "ancestor", name
+        setattr(descendent, name, value)
+
+    return descendent    
+
 # target = (x, y)
 # units = list(CircularUnit)
 # TODO(vyakunin): decide on a better interface
@@ -222,7 +238,28 @@ def FindOptimalPaths(me, units, world):
     me_point = deepcopy(me)
     me_point.radius = 0
     # import pdb; pdb.set_trace()
-    all_units = [me_point] + units
+    circles = [CircularUnit(None, None, None, None, None, None, None, None)
+               for _ in range(len(units))]
+    for i, u in enumerate(units):
+        circles[i] = Downcast(u, circles[i])
+    units = circles
+    # print units 
+    all_units = deepcopy(units)
+    for o in units:
+        if abs(o.speed_x) + abs(o.speed_y) > EPSILON:
+            new_o = deepcopy(o)
+            new_o.x += o.speed_x
+            new_o.y += o.speed_y
+            all_units.append(new_o)
+    for o in all_units:  
+        o.radius = o.radius + me.radius + 5
+        if me.get_distance_to_unit(o) < o.radius + EPSILON:
+            o.radius = max(0, me.get_distance_to_unit(o) - EPSILON)
+    all_units = [me_point] + all_units
+    
+
+        
+    
     # points[i]: Point
     points = []
     # graph[point_no_i]: [(point_no_j, direct_distance_i_to_j), ...]}
@@ -282,21 +319,37 @@ def FindOptimalPaths(me, units, world):
     optimal_distances, previous_points = Dijkstra(graph)
     return (points, previous_points, optimal_distances, points_per_unit)
     
-def CloseEnough(me, t, prev, points):
-    if prev[1]:
+def CloseEnough(me, t, c):
+    if c[1]:
         # import pdb; pdb.set_trace()
-        return abs(me.get_distance_to_unit(prev[2]) - prev[2].radius) < MACRO_EPSILON
+        return abs(me.get_distance_to_unit(c[2]) - c[2].radius) < MACRO_EPSILON
     # import pdb; pdb.set_trace()
-    return abs(me.get_distance_to_unit(points[t]) + me.get_distance_to_unit(points[prev[0]]) - 
-        points[t].GetDistanceTo(points[prev[0]])) < MACRO_EPSILON
+    return abs(me.get_distance_to_unit(t) + me.get_distance_to_unit(c[0]) - 
+        t.GetDistanceTo(c[0])) < MACRO_EPSILON
         
-def BuildPathAngle(me, t, path, p):
-    if not path[1]:
-        return me.get_angle_to_unit(p[t])
-    c = path[2]
+def BuildPathAngle(me, path):
+    t = None
+    c = None
+    for i, b in enumerate(path[:-1]):
+        if b[1] and b[2].radius < EPSILON:
+            continue
+        e = path[i+1]
+        if b[0].GetDistanceTo(e[0]) < EPSILON:
+            continue
+        if CloseEnough(me, e[0], b):
+            t = e[0]
+            c = b
+            
+    if t is None:
+        print 'no path from '
+        print me
+        return None
+    if not c[1]:
+        return me.get_angle_to_unit(t)
+    c = c[2]
     me_p = Point.FromUnit(me)
     v_to_c = Point.FromUnit(c) - me_p
-    v_to_t = p[t] - me_p
+    v_to_t = t - me_p
     c1 = v_to_c.Rotate(pi/2)
     if c1.ScalarMul(v_to_t) > 0:
         # import pdb; pdb.set_trace()
@@ -304,11 +357,20 @@ def BuildPathAngle(me, t, path, p):
     c2 = v_to_c.Rotate(-pi/2)
     return c2.GetAngle() - me.angle
     
-def BuildNextAngle(me, target, game, world):
+# returns [[point, is_arc, circle]]
+def BuildPath(me, target, game, world):
     obstacles = BuildObstacles(me, world, game)
     target = CircularUnit(0, target.x, target.y, 0, 0, 0, 0, 0)
+    obstacles = [o for o in obstacles if o.get_distance_to_unit(target) > o.radius + EPSILON]
     p, prev, d, points_per_unit = FindOptimalPaths(
         me, [target] + obstacles, world)
+    # print 'points:'
+#     print p
+#     print 'prev:'
+#     print prev
+#     print 'optimal_distances:'
+    # print d
+    
     # import pdb; pdb.set_trace()
     t_id = -1
     min_d = 1e6
@@ -317,17 +379,17 @@ def BuildNextAngle(me, target, game, world):
             min_d = d[ps]
             t_id = ps
     if t_id == -1:
-        # import pdb; pdb.set_trace()
+        import pdb; pdb.set_trace()
         print 'no way to ' + str(target)
-        return 0.0
-    path = prev[t_id]
-    while prev[t_id][0] != -1 and not CloseEnough(me, t_id, prev[t_id], p):
-        path = prev[t_id]        
+        return None
+    # import pdb; pdb.set_trace()
+    path = [(p[t_id], prev[t_id])]
+    
+    while prev[t_id][0] != -1:
         t_id = prev[t_id][0]
-
-    if path[0] == -1:
-        # import pdb; pdb.set_trace()
-        print 'no way to ' + str(target)        
-        return 0.0
-        
-    return BuildPathAngle(me, t_id, path, p)
+        path.append((p[t_id], prev[t_id]))
+    path.reverse()
+    
+    for i, p in enumerate(path[:-1]):
+        path[i] = [path[i][0]] + list(path[i+1][1][1:])
+    return path

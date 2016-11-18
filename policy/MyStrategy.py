@@ -167,8 +167,8 @@ class RemotePolicy(object):
         epsilon = 0.5 / (1 + self.steps / 1000.)
         self.steps += 1 
 
-        if np.random.rand() < epsilon:
-            return np.random.choice(range(self.max_actions))
+        # if np.random.rand() < epsilon:
+        #     return np.random.choice(range(self.max_actions))
 
         if self.coeff == None or np.random.rand() < 0.5:
             if state_dict['my_base_state'][0] < 50:
@@ -236,7 +236,7 @@ class MyStrategy:
         @type game: Game
         @type move: Move
         """
-        lane = LaneType.TOP
+        lane = LaneType.MIDDLE
 
         state = self.EncodeState(me, world, game)
         cur_state_dict = state.Get(None)
@@ -245,7 +245,7 @@ class MyStrategy:
         noop = Actions.NoOpAction()
         actions = ([Actions.FleeAction(game.map_size, lane),
                     Actions.AdvanceAction(game.map_size, lane)] +
-                   [Actions.RangedAttack(enemy) for enemy in hostile] +
+                   [Actions.RangedAttack(game.map_size, lane, enemy) for enemy in hostile] +
                    [noop] * (MAX_TARGETS_NUM - len(hostile)))
 
         a = self.policy.Act(cur_state_dict)
