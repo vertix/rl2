@@ -10,6 +10,7 @@ from Geometry import BuildPathAngle
 from Geometry import BuildPath
 from Analysis import GetAggro
 from Analysis import PickTarget
+from Analysis import PickReachableTarget
 from copy import deepcopy
 
 import math
@@ -17,8 +18,8 @@ import math
 
 NUM_STEPS_PER_LANE = 6
 WAYPOINT_RADIUS = 300 # must be less than distance between waypoints!
-GRAPH_COOLDOWN = 30
-TARGET_COOLDOWN = 60
+GRAPH_COOLDOWN = 20
+TARGET_COOLDOWN = 20
 MISSILE_DISTANCE_ERROR = 10
 MARGIN = 200
 
@@ -136,8 +137,9 @@ class MoveAction(object):
                 # print t
         if t is None:
             return
-        # print t.id, t.x, t.y
-        # print t.faction, me.faction
+        print t.get_distance_to_unit(me)
+        print t.id, t.x, t.y
+        print t.faction, me.faction
         move.action = ActionType.MAGIC_MISSILE
         angle_to_target = me.get_angle_to_unit(t)
         distance = me.get_distance_to_unit(t)
@@ -166,15 +168,17 @@ class FleeAction(MoveAction):
         aggro = GetAggro(me, game, world)
         # print # aggro
         target = None
-        target = PickTarget(me, world, game)
+        target = PickReachableTarget(me, world, game)
         if aggro > 0:
             print 'really flee'
+            self.last_graph_updated = -100
             self.MakeFleeMove(me, world, game, move)
         elif (target is not None) and (
             # we have to be able to comfortably attack
             target.get_distance_to_unit(me) - target.radius < 
             me.cast_range - 2 * target.radius):
             print 'really flee'
+            self.last_graph_updated = -100
             self.MakeFleeMove(me, world, game, move) 
         else:
             print 'ruuuush'
@@ -207,8 +211,11 @@ class RangedAttack(MoveAction):
         move = Move()
         self.MakeMissileMove(me, world, game, move)
             
-        if (self.focus_target is not None) and (me.get_distance_to_unit(self.focus_target) > 
-            me.cast_range - self.focus_target.radius + MISSILE_DISTANCE_ERROR):
-            # import pdb; pdb.set_trace()
-            self.RushToTarget(me, self.focus_target, move, game, world)
+        if self.focus_target is not None: 
+            if (me.get_distance_to_unit(self.focus_target) > 
+                me.cast_range - self.focus_target.radius + MISSILE_DISTANCE_ERROR):
+                # import pdb; pdb.set_trace()
+                self.RushToTarget(me, self.focus_target, move, game, world)
+        else:
+            self.MakeAdvanceMove(me, world, game, move)
         return move
