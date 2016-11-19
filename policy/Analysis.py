@@ -47,10 +47,10 @@ def PickTarget(me, world, game):
         enemies = [e for e in world.wizards + world.minions + world.buildings if
                    (e.faction != me.faction) and (e.faction != Faction.NEUTRAL) and 
                    (e.faction != Faction.OTHER) and (e.get_distance_to_unit(me) < 700)]
-        
+
         return ClosestUnit(me, enemies)
     return best
-    
+
 
 def GetAggro(me, game, world):
     allies = [a for a in world.wizards + world.minions + world.buildings if
