@@ -192,5 +192,5 @@ class RangedAttack(MoveAction):
             self.RushToTarget(me, self.target, move, game, world)
         else:
             self.MakeFleeMove(me, world, game, move)
-        self.MakeMissileMove(me, world, game, move, target)
+        self.MakeMissileMove(me, world, game, move, self.target)
         return move
