@@ -98,6 +98,31 @@ def NormalizeObjects(objs):
 MAX_TARGETS_NUM = 5
 
 
+def ReLu(x):
+    return np.maximum(x, 0)
+
+
+class QFunction(object):
+    def __init__(self, network_vars):
+        self.vars = network_vars
+
+    def Q(self, state):
+        state = np.matmul(state, self.vars['model/hidden1/weights:0'])
+        state += self.vars['model/hidden1/biases:0']
+        state = ReLu(state)
+
+        state = np.matmul(state, self.vars['model/hidden2/weights:0'])
+        state += self.vars['model/hidden2/biases:0']
+        state = ReLu(state)
+
+        state = np.matmul(state, self.vars['model/output/weights:0'])
+        state += self.vars['model/output/biases:0']
+        return state
+
+    def Select(self, state):
+        return np.argmax(self.Q(state.to_numpy()))
+
+
 class RemotePolicy(object):
     def __init__(self, address, max_actions):
         self.active = True
@@ -112,23 +137,23 @@ class RemotePolicy(object):
         else:
             self.sock = None
 
-        self.coeff = None
+        self.q = None
         self.steps = 0
         self.max_actions = max_actions
 
     def Listen(self):
         while self.active:
-            self.coeff = self.sock.recv_pyobj()
+            self.q = QFunction(self.sock.recv_pyobj())
             print 'Recieved coeff'
 
     def Act(self, state):
         epsilon = 0.5 / (1 + self.steps / 1000.)
-        self.steps += 1 
+        self.steps += 1
 
-        # if np.random.rand() < epsilon:
-        #     return np.random.choice(range(self.max_actions))
+        if np.random.rand() < epsilon:
+            return np.random.choice(range(self.max_actions))
 
-        if self.coeff == None or np.random.rand() < 0.5:
+        if self.q == None or np.random.rand() < 0.5:
             if state.my_state.hp < 50:
                 # print 'FLEE'
                 return 0  # FLEE
@@ -138,7 +163,7 @@ class RemotePolicy(object):
                 # print 'ADVANCE'
                 return 1  # ADVANCE
         else:
-            pass
+            return self.q.Select(state)
 
 
 NUM_ACTIONS = 2 + MAX_TARGETS_NUM
