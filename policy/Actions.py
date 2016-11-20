@@ -7,7 +7,7 @@ from model.World import World
 from model.Unit import Unit
 from Geometry import Point
 from Geometry import BuildPathAngle
-from Geometry import BuildPath
+from CachedGeometry import Cache
 from Analysis import GetAggro
 from Analysis import PickTarget
 from Analysis import PickReachableTarget
@@ -18,7 +18,6 @@ import math
 
 NUM_STEPS_PER_LANE = 6
 WAYPOINT_RADIUS = 300 # must be less than distance between waypoints!
-GRAPH_COOLDOWN = 20
 TARGET_COOLDOWN = 20
 MISSILE_DISTANCE_ERROR = 10
 MARGIN = 200
@@ -78,15 +77,12 @@ class MoveAction(object):
         for key in self.waypoints_by_lane:
             self.waypoints_by_lane[key] = [start] + self.waypoints_by_lane[key] + [end]
 
-        self.last_graph_updated = -GRAPH_COOLDOWN
         self.last_target = -TARGET_COOLDOWN
         self.focus_target = None
         self.path = None
 
     def RushToTarget(self, me, target, move, game, world):
-        if (self.path is None) or (self.last_graph_updated + GRAPH_COOLDOWN <= world.tick_index):
-            self.path = BuildPath(me, target, game, world)
-            self.last_graph_updated = world.tick_index
+        self.path = Cache.GetInstance().GetPathToTarget(me, target, game, world)
         if self.path is None:
             angle = me.get_angle_to_unit(target)
         else:
@@ -187,11 +183,8 @@ class RangedAttack(MoveAction):
         move = Move()
         self.MakeMissileMove(me, world, game, move)
 
-        if self.focus_target is not None:
-            if (me.get_distance_to_unit(self.focus_target) >
-                    me.cast_range - self.focus_target.radius + MISSILE_DISTANCE_ERROR):
-                # import pdb; pdb.set_trace()
-                self.RushToTarget(me, self.focus_target, move, game, world)
-        else:
-            self.MakeAdvanceMove(me, world, game, move)
+        if (me.get_distance_to_unit(self.target) >
+                me.cast_range - self.target.radius + MISSILE_DISTANCE_ERROR):
+            # import pdb; pdb.set_trace()
+            self.RushToTarget(me, self.target, move, game, world)
         return move
