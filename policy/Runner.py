@@ -7,7 +7,7 @@ from model.Move import Move
 
 class Runner:
     def __init__(self):
-        if sys.argv.__len__() == 4:
+        if False and sys.argv.__len__() == 4:
             self.remote_process_client = RemoteProcessClient(sys.argv[1], int(sys.argv[2]))
             self.token = sys.argv[3]
         else:
@@ -46,6 +46,12 @@ class Runner:
 
                 self.remote_process_client.write_moves_message(moves)
         finally:
+            # END GAME
+            for s in strategies:
+                # import pdb; pdb.set_trace()
+                if hasattr(s, 'stop'):
+                    s.stop()
+
             self.remote_process_client.close()
 
 
