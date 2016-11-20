@@ -52,30 +52,30 @@ def PickTarget(me, world, game):
     return best
 
 
-def GetAggro(me, game, world):
+def GetAggro(me, game, world, safe_distance):
     allies = [a for a in world.wizards + world.minions + world.buildings if
               (a.id != me.id) and (a.faction == me.faction) and 
               (a.get_distance_to_unit(me) < me.vision_range)]
     aggro = 0
     for w in world.wizards:
         d = w.get_distance_to_unit(me)
-        if w.faction != me.faction and d - me.radius < w.cast_range + CAST_RANGE_ERROR:
+        if (w.faction != me.faction) and (d - me.radius < w.cast_range + safe_distance):
             aggro += WIZARD
     for m in world.minions:
         if (m.faction != me.faction and m.faction != Faction.NEUTRAL and 
             m.faction != Faction.OTHER):
             d = m.get_distance_to_unit(me)
             if m.type == MinionType.ORC_WOODCUTTER:
-                if Closest(m, allies) > d - 10:
+                if Closest(m, allies) > d - safe_distance:
                     aggro += WOODCUTTER
             else:
-                if d - me.radius < game.fetish_blowdart_attack_range + CAST_RANGE_ERROR:
-                    if Closest(m, allies) > d - 10:
+                if d - me.radius < game.fetish_blowdart_attack_range + safe_distance:
+                    if Closest(m, allies) > d - safe_distance:
                         aggro += FETISH
     for b in world.buildings:
         d = b.get_distance_to_unit(me)
-        if b.faction != me.faction and d - me.radius < b.attack_range + CAST_RANGE_ERROR:
-            if Closest(b, allies) > d - 10:
+        if b.faction != me.faction and d - me.radius < b.attack_range + safe_distance:
+            if Closest(b, allies) > d - safe_distance:
                 aggro += TOWER
             else:
                 aggro += TOWER / 2

@@ -7,6 +7,7 @@ from model.World import World
 from model.Unit import Unit
 from Geometry import Point
 from Geometry import BuildPathAngle
+from Geometry import HasMeleeTarget
 from CachedGeometry import Cache
 from Analysis import GetAggro
 from Analysis import PickTarget
@@ -151,29 +152,32 @@ class MoveAction(object):
 
         if distance > me.cast_range - t.radius + MISSILE_DISTANCE_ERROR:
             move.action = ActionType.NONE
+        if move.action == ActionType.MAGIC_MISSILE:
+            return
+        if HasMeleeTarget(me, world, game):
+            move.action = ActionType.STAFF
 
 
 class FleeAction(MoveAction):
-    def __init__(self, map_size, lane):
+    def __init__(self, map_size, lane, safe_distance=10):
         MoveAction.__init__(self, map_size, lane)
+        self.safe_distance = safe_distance
 
     def Act(self, me, world, game):
         print 'flee'
         move = Move()
-        aggro = GetAggro(me, game, world)
+        aggro = GetAggro(me, game, world, self.safe_distance)
         # print # aggro
         target = None
         target = PickReachableTarget(me, world, game)
         if aggro > 0:
             print 'really flee'
-            self.last_graph_updated = -100
             self.MakeFleeMove(me, world, game, move)
         elif (target is not None) and (
                 # we have to be able to comfortably attack
                 target.get_distance_to_unit(me) - target.radius <
                 me.cast_range - 2 * target.radius):
             print 'really flee'
-            self.last_graph_updated = -100
             self.MakeFleeMove(me, world, game, move)
         else:
             print 'ruuuush'
@@ -196,17 +200,19 @@ class AdvanceAction(MoveAction):
 
 
 class RangedAttack(MoveAction):
-    def __init__(self, map_size, lane, target):
+    def __init__(self, map_size, lane, target, opt_range_allowance = 40):
         MoveAction.__init__(self, map_size, lane)
         self.target = target
+        self.opt_range_allowance = opt_range_allowance
 
     def Act(self, me, world, game):
         print 'ranged_attack'
         move = Move()
-        self.MakeMissileMove(me, world, game, move)
-
-        if (me.get_distance_to_unit(self.target) >
-                me.cast_range - self.target.radius + MISSILE_DISTANCE_ERROR):
+        range_allowance = me.get_distance_to_unit(self.target) - me.cast_range + self.target.radius
+        if range_allowance > self.opt_range_allowance:
             # import pdb; pdb.set_trace()
             self.RushToTarget(me, self.target, move, game, world)
+        else:
+            self.MakeFleeMove(me, world, game, move)
+        self.MakeMissileMove(me, world, game, move)
         return move

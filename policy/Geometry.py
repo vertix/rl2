@@ -8,6 +8,9 @@ from math import sqrt
 from copy import deepcopy
 from Graph import Dijkstra
 from model.CircularUnit import CircularUnit
+from model.Wizard import Wizard
+from model.Minion import Minion
+from model.MinionType import MinionType
 
 EPSILON = 1E-4
 MACRO_EPSILON = 2
@@ -211,11 +214,17 @@ def AddEdge(points, world, i1, i2, d, g, is_arc=False, circle=None):
         print circle.y
         print circle.radius
     
+def GetAngleDiff(a1, a2):
+    alpha = abs(a1 - a2)
+    while alpha > 2 * pi:
+        alpha -= 2 * pi
+    return alpha
+
 def GetArcLength(a1, a2, r):
     # print r
     # print a1
     # print a2
-    return abs(a1 - a2) * r
+    return GetAngleDiff(a1, a2) * r
     
 def Downcast(ancestor, descendent):
     """
@@ -396,3 +405,66 @@ def BuildPath(me, target, game, world):
     for i, p in enumerate(path[:-1]):
         path[i] = [path[i][0]] + list(path[i+1][1][1:])
     return path
+    
+def SegmentsIntersect(l1, r1, l2, r2):
+    if abs(l1 - l2) + abs(r1 - r2) < EPSILON:
+        return True
+    return (((l1 < l2 - EPSILON) and (r1 > l2 + EPSILON))
+            or ((l2 < l1 - EPSILON) and (r2 > l1 + EPSILON)))
+
+def NormAngle(a):
+    while a < -pi - EPSILON:
+        a += 2 * pi
+    while a > pi - EPSILON:
+        a -= 2 * pi
+    
+
+def ArcsIntersect(l1, r1, l2, r2):
+    NormAngle(l1)
+    NormAngle(l2)
+    NormAngle(r1)
+    NormAngle(r2)
+    a1 = [(l1, r1)]
+    if l1 > r1:
+        a1 = [(l1, pi), (pi, r2)]
+    a2 = [(l2, r2)]
+    if l2 > r2:
+        a2 = [(l2, pi), (pi, r2)]
+    for a in a1:
+        for b in a2:
+            if SegmentsIntersect(a[0], a[1], b[0], b[1]):
+                return True
+    return False
+    
+def SectorCovers(u, a, r, t):
+    uc = CircularUnit(0, u.x, u.y, 0, 0, 0, 0, r)
+    if (Point.FromUnit(u) + 
+        Point(cos(u.angle) * r, sin(u.angle) * r)).GetDistanceTo(t) < t.radius - EPSILON:
+        return True
+    
+    # returns ([p1, p2], [(a1, a2), (b1, b2)]) or None, where pX - points, aX - corresponding
+    # angles on c1, bX - corresponding angles on c2 intersection goes from a1 to a2 in positive
+    # direction on c1 and in negative on c2.
+    ints = IntersectCircles(uc, t)
+    if ints is None:
+        return False
+    _, alphas = ints
+    a1, a2 = alphas[0]
+    return ArcsIntersect(u.angle - a, u.angle + a, a1, a2)
+    
+    
+def HasMeleeTarget(u, world, game):
+    a = None
+    r = None
+    if isinstance(u, Wizard):
+        a = game.staff_sector
+        r = game.staff_range
+    if isinstance(u, Minion) and (u.type == MinionType.ORC_WOODCUTTER):
+        a = orc_woodcutter_attack_sector
+        r = orc_woodcutter_attack_range
+    if r is None:
+        return False
+    for t in world.wizards + world.minions + world.buildings + world.trees:
+        if (t.faction != u.faction) and SectorCovers(u, a, r, t):
+            return True
+    return False
