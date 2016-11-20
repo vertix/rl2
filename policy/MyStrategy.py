@@ -99,6 +99,7 @@ class RemotePolicy(object):
     def Stop(self):
         if self._stop:
             self._stop.set()
+            self.thread.join()
 
     def Listen(self):
         poller = zmq.Poller()
@@ -167,7 +168,6 @@ class MyStrategy:
 
     def stop(self):
         self.policy.Stop()
-        self.policy.thread.join()
 
     def SaveExperience(self, s, a, r, s1):
         if not self.sock:
