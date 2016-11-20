@@ -1,7 +1,10 @@
 import cPickle
+import os
 import re
 import sys
-import os
+import time
+
+import numpy as np
 
 from model.ActionType import ActionType
 from model.BuildingType import BuildingType
@@ -13,6 +16,7 @@ from model.Move import Move
 from model.Wizard import Wizard
 from model.World import World
 
+import Actions
 import State
 
 try:
@@ -20,79 +24,6 @@ try:
 except ImportError:
     print "ZMQ is not availabe"
     zmq = None
-
-import Actions
-
-import numpy as np
-
-def EncodeFaction(their, mine):
-    # [1, 0, 0] if its our unit
-    # [0, 1, 0] if its enemy
-    # [0, 0, 1] if its neutral
-    if their == mine:
-        return [1, 0, 0]
-    elif their == Faction.NEUTRAL or their == Faction.OTHER:
-        return [0, 1, 0]
-    else:
-        return [0, 0, 1]
-
-
-def EncodeType(obj):
-    result = [0] * 5
-    if obj == 'w':
-        result[0] = 1.
-    elif obj == 'm':
-        result[1] = 1.
-    elif obj == 'f':
-        result[2] = 1.
-    elif obj == 't':
-        result[3] = 1.
-    elif obj == 'b':
-        result[4] = 1.
-    return result
-
-
-def EncodeWizard(w, me):
-    dist = w.get_distance_to_unit(me)
-    return np.array(EncodeType('w') + [
-        w.life, w.max_life, w.mana, w.max_mana, w.speed_x, w.speed_y, w.angle,
-        w.x - me.x, w.y - me.y, dist, w.cast_range,
-        w.vision_range, w.remaining_action_cooldown_ticks]), dist, w
-
-
-def EncodeMinion(m, me):
-    dist = m.get_distance_to_unit(me)
-    # TODO(handle neutral minions)
-    m_type = 'm' if m.type == MinionType.ORC_WOODCUTTER else 'f'
-    return np.array(EncodeType(m_type) + [
-        m.life, m.max_life, 0., 0., m.speed_x, m.speed_y, m.angle,
-        m.x - me.x, m.y - me.y, dist, 0.,
-        m.vision_range, m.remaining_action_cooldown_ticks]), dist, m
-
-
-def EncodeBuilding(b, me):
-    dist = b.get_distance_to_unit(me)
-    b_type = 't' if b.type == BuildingType.GUARDIAN_TOWER else 'b'
-    return np.array(EncodeType(b_type) + [
-        b.life, b.max_life, 0., 0., b.speed_x, b.speed_y, b.angle,
-        b.x - me.x, b.y - me.y, dist, b.attack_range,
-        b.vision_range, b.remaining_action_cooldown_ticks]), dist, b
-
-
-DEFAULT_OTHER_STATE = np.array([
-    0., 0., # Life, max life
-    0., 0., # Mana, max mana
-    0., 0., 0., # Speed x, y, and angle
-    0., 0., 0., # Delta x, Delta y and distance
-    0., 0., 0., # Cast and vision ranges, remaining_cooldown
-] + EncodeType(''))
-
-
-def NormalizeObjects(objs):
-    objs = sorted(objs, key=lambda x: x[1])[:MAX_TARGETS_NUM]
-    objs = [v for v, _, _ in objs]
-    objs.extend([DEFAULT_OTHER_STATE] * (MAX_TARGETS_NUM - len(objs)))
-    return np.hstack(objs)
 
 
 MAX_TARGETS_NUM = 5
@@ -115,23 +46,34 @@ class QFunction(object):
         state += self.vars['model/hidden2/biases:0']
         state = ReLu(state)
 
-        state = np.matmul(state, self.vars['model/output/weights:0'])
-        state += self.vars['model/output/biases:0']
-        return state
+        value = np.matmul(state, self.vars['model/val_hid/weights:0'])
+        value += self.vars['model/val_hid/biases:0']
+        value = ReLu(value)
+        value = np.matmul(value, self.vars['model/value/weights:0'])
+        value += self.vars['model/value/biases:0']
+
+        adv = np.matmul(state, self.vars['model/adv_hid/weights:0'])
+        adv += self.vars['model/adv_hid/biases:0']
+        adv = ReLu(adv)
+        adv = np.matmul(adv, self.vars['model/advantage/weights:0'])
+        adv += self.vars['model/advantage/biases:0']
+
+        return value + (adv - adv.mean())
 
     def Select(self, state):
-        return np.argmax(self.Q(state.to_numpy()))
+        value = self.Q(state.to_numpy())
+        res = np.argmax(value)
+        return res, value[res]
 
 
 class RemotePolicy(object):
     def __init__(self, address, max_actions):
-        self.active = True
         if address and zmq:
             self.sock = zmq.Context().socket(zmq.SUB)
             self.sock.setsockopt(zmq.SUBSCRIBE, "")
             self.sock.connect(address)
             import threading
-            # TODO(vertix): COLLECT THE THREAD!!!
+            self._stop = threading.Event()
             self.thread = threading.Thread(target=self.Listen)
             self.thread.start()
         else:
@@ -140,20 +82,31 @@ class RemotePolicy(object):
         self.q = None
         self.steps = 0
         self.max_actions = max_actions
+        self.last_action = None
+
+    def Stop(self):
+        self._stop.set()
 
     def Listen(self):
-        while self.active:
-            self.q = QFunction(self.sock.recv_pyobj())
-            print 'Recieved coeff'
+        poller = zmq.Poller()
+        poller.register(self.sock, zmq.POLLIN)
+
+        while not self._stop.isSet():
+            evts = poller.poll(1000)
+            if evts:
+                self.q = QFunction(evts[0][0].recv_pyobj())
+                print 'Recieved coeff'
+        print 'Exitting...'
 
     def Act(self, state):
         epsilon = 0.5 / (1 + self.steps / 1000.)
         self.steps += 1
 
         if np.random.rand() < epsilon:
+            print 'eps = %.3f' % epsilon
             return np.random.choice(range(self.max_actions))
 
-        if self.q == None or np.random.rand() < 0.5:
+        if self.q == None: # or np.random.rand() < 0.5:
             if state.my_state.hp < 50:
                 # print 'FLEE'
                 return 0  # FLEE
@@ -163,7 +116,13 @@ class RemotePolicy(object):
                 # print 'ADVANCE'
                 return 1  # ADVANCE
         else:
-            return self.q.Select(state)
+            res, val = self.q.Select(state)
+            action = (['FLEE', 'ADVANCE'] +
+                      ['ATTACK_%d' %i for i in range(1, MAX_TARGETS_NUM + 1)])[res]
+            if action != self.last_action:
+                self.last_action = action
+                print '%s: %.2f' % (action, val)
+            return res
 
 
 NUM_ACTIONS = 2 + MAX_TARGETS_NUM
@@ -194,8 +153,9 @@ class MyStrategy:
         self.advance_action = None
         self.lane = None
 
-    def __del__(self):
-        self.policy.thread.join(0.1)
+    def stop(self):
+        self.policy.Stop()
+        self.policy.thread.join()
 
     def SaveExperience(self, s, a, r, s1):
         if not self.sock:
@@ -219,7 +179,10 @@ class MyStrategy:
         @type move: Move
         """
         if self.flee_action is None:
-            self.lane = LaneType.TOP
+            if len(sys.argv) > 3:
+                self.lane = int(sys.argv[3])
+            else:
+                self.lane = LaneType.TOP
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 

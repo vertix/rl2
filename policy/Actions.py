@@ -89,7 +89,7 @@ class MoveAction(object):
             angle = BuildPathAngle(me, self.path)
         if angle is None:
             # TODO debug
-            print 'WTF'
+            # print 'WTF'
             angle = 0.3
         MoveTowardsAngle(angle, move)
 
