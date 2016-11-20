@@ -11,9 +11,9 @@ class Cache(object):
         
         
     @classmethod
-    def GetInstance(cls)
-        if instance is None:
-            instance = Cache()
+    def GetInstance(cls):
+        if Cache.instance is None:
+            Cache.instance = Cache()
         return Cache.instance
     
     def InvalidateOldCache(self, tick):
@@ -25,22 +25,24 @@ class Cache(object):
         self.paths[key] = value
         heappush(self.times_and_keys, (tick, key))
     
-    def GetEntryFor(self, key, me, u, game, world):
+    def GetEntryFor(self, key, me, t, game, world):
         self.InvalidateOldCache(world.tick_index)
-        if key in paths:
-            return paths[key]
-        path = BuildPath(me, target, game, world)
+        if key in self.paths:
+            return self.paths[key]
+        path = BuildPath(me, t, game, world)
         self.AddEntry(key, path, world.tick_index)
         return path        
         
     def BuildKey(self, u):
-        if hasattr(u, id) and u.id:
+        if hasattr(u, 'id') and u.id:
             return str(u.id)
-        return 'x:%d,y:%d,r:%d' % (((int(u.x) + 4) / 5) * 5,
-                                   ((int(u.y) + 4) / 5) * 5, 
-                                   int(u.radius))
+        key = 'x:%d,y:%d' % (((int(u.x) + 4) / 5) * 5,
+                                   ((int(u.y) + 4) / 5) * 5)
+        if hasattr(u, 'radius'):
+            key += 'r:%d' % int(u.radius)
+        return key
         
     def GetPathToTarget(self, me, t, game, world):
-        key = BuildKey(t)
+        key = self.BuildKey(t)
         return self.GetEntryFor(key, me, t, game, world)
     

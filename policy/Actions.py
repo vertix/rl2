@@ -83,7 +83,7 @@ class MoveAction(object):
 
     def RushToTarget(self, me, target, move, game, world):
         # print me.x, me.y, target
-        self.path = Cache.GetInstance().GetPathToTarget(self, me, target, game, world)
+        self.path = Cache.GetInstance().GetPathToTarget(me, target, game, world)
             # print world.tick_index
         # print self.path
         if self.path is None:
