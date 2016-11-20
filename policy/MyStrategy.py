@@ -33,27 +33,38 @@ def ReLu(x):
     return np.maximum(x, 0)
 
 
+def BatchNorm(state, network_vars, key):
+    eps = 0.001
+    inv = 1.0 / np.sqrt(network_vars[key + '/moving_variance:0'] + eps)
+
+    return state * inv + (network_vars[key + '/beta:0'] - network_vars[key + '/moving_mean:0'] * inv)
+
+
 class QFunction(object):
     def __init__(self, network_vars):
         self.vars = network_vars
 
     def Q(self, state):
         state = np.matmul(state, self.vars['model/hidden1/weights:0'])
-        state += self.vars['model/hidden1/biases:0']
+        # state += self.vars['model/hidden1/biases:0']
+        state = BatchNorm(state, self.vars, 'model/hidden1/BatchNorm')
         state = ReLu(state)
 
         state = np.matmul(state, self.vars['model/hidden2/weights:0'])
-        state += self.vars['model/hidden2/biases:0']
+        # state += self.vars['model/hidden2/biases:0']
+        state = BatchNorm(state, self.vars, 'model/hidden2/BatchNorm')
         state = ReLu(state)
 
         value = np.matmul(state, self.vars['model/val_hid/weights:0'])
-        value += self.vars['model/val_hid/biases:0']
+        value = BatchNorm(value, self.vars, 'model/val_hid/BatchNorm')
+        # value += self.vars['model/val_hid/biases:0']
         value = ReLu(value)
         value = np.matmul(value, self.vars['model/value/weights:0'])
         value += self.vars['model/value/biases:0']
 
         adv = np.matmul(state, self.vars['model/adv_hid/weights:0'])
-        adv += self.vars['model/adv_hid/biases:0']
+        adv = BatchNorm(adv, self.vars, 'model/adv_hid/BatchNorm')
+        # adv += self.vars['model/adv_hid/biases:0']
         adv = ReLu(adv)
         adv = np.matmul(adv, self.vars['model/advantage/weights:0'])
         adv += self.vars['model/advantage/biases:0']
@@ -78,6 +89,7 @@ class RemotePolicy(object):
             self.thread.start()
         else:
             self.sock = None
+            self._stop = None
 
         self.q = None
         self.steps = 0
@@ -85,7 +97,8 @@ class RemotePolicy(object):
         self.last_action = None
 
     def Stop(self):
-        self._stop.set()
+        if self._stop:
+            self._stop.set()
 
     def Listen(self):
         poller = zmq.Poller()
