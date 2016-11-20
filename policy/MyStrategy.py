@@ -103,7 +103,6 @@ class RemotePolicy(object):
         self.steps += 1
 
         if np.random.rand() < epsilon:
-            print 'eps = %.3f' % epsilon
             return np.random.choice(range(self.max_actions))
 
         if self.q == None: # or np.random.rand() < 0.5:
