@@ -13,6 +13,8 @@ from model.Move import Move
 from model.Wizard import Wizard
 from model.World import World
 
+import State
+
 try:
     import zmq
 except ImportError:
@@ -95,48 +97,6 @@ def NormalizeObjects(objs):
 
 MAX_TARGETS_NUM = 5
 
-class State(object):
-    def __init__(self, me, world, game):
-        self.me = me
-        self.world = world
-        self.game = game
-
-    def Get(self, fields):
-        result = {}
-        if fields is None or 'my_base_state' in fields:
-            result['my_base_state'] = np.array(
-            [self.me.life, self.me.max_life, self.me.mana,
-             self.me.max_mana, self.me.angle, self.me.speed_x, self.me.speed_y,
-             self.me.remaining_action_cooldown_ticks])
-        if fields is None or 'other_base_state' in fields:
-            frie_objs, host_obj = [], []
-            for w in self.world.wizards:
-                objs = frie_objs if w.faction == self.me.faction else host_obj
-                objs.append(EncodeWizard(w, self.me))
-            for m in self.world.minions:
-                if m.faction in [Faction.NEUTRAL, Faction.OTHER]:
-                    continue  # TODO(vertix): HANDLE NEUTRAL MINIONS
-
-                objs = frie_objs if m.faction == self.me.faction else host_obj
-                objs.append(EncodeMinion(m, self.me))
-
-            for b in self.world.buildings:
-                objs = frie_objs if b.faction == self.me.faction else host_obj
-                objs.append(EncodeBuilding(b, self.me))
-
-            result['other_base_state'] = np.hstack([NormalizeObjects(host_obj), NormalizeObjects(frie_objs)])
-
-            MAX_RADIUS = 800.
-            result['hostile'] = [x for _, dist, x in sorted(host_obj, key=lambda x:x[1])
-                                 if dist < MAX_RADIUS]
-
-
-        return result
-
-
-def Q(coeff, state, action):
-    return coeff[action].dot(state)
-
 
 class RemotePolicy(object):
     def __init__(self, address, max_actions):
@@ -161,9 +121,7 @@ class RemotePolicy(object):
             self.coeff = self.sock.recv_pyobj()
             print 'Recieved coeff'
 
-    def Act(self, state_dict):
-        hostile = state_dict['hostile']
-
+    def Act(self, state):
         epsilon = 0.5 / (1 + self.steps / 1000.)
         self.steps += 1 
 
@@ -171,19 +129,16 @@ class RemotePolicy(object):
         #     return np.random.choice(range(self.max_actions))
 
         if self.coeff == None or np.random.rand() < 0.5:
-            if state_dict['my_base_state'][0] < 50:
+            if state.my_state.hp < 50:
                 # print 'FLEE'
                 return 0  # FLEE
-            elif hostile:
+            elif state.enemy_states:
                 return 2  # RANGE ATTACK CLOSEST
             else:
                 # print 'ADVANCE'
                 return 1  # ADVANCE
         else:
-            state = np.hstack([state_dict['my_base_state'],
-                               state_dict['other_base_state']])
-            return np.argmax([Q(self.coeff, state, a)
-                              for a in range(self.max_actions)])
+            pass
 
 
 NUM_ACTIONS = 2 + MAX_TARGETS_NUM
@@ -217,18 +172,15 @@ class MyStrategy:
     def __del__(self):
         self.policy.thread.join(0.1)
 
-    def EncodeState(self, me, world, game):
-        return State(me, world, game)
-
     def SaveExperience(self, s, a, r, s1):
         if not self.sock:
             return
 
         data = {
-            's': np.hstack([s['my_base_state'], s['other_base_state']]),
+            's': s.to_numpy(),
             'a': a,
             'r': r,
-            's1': np.hstack([s1['my_base_state'], s1['other_base_state']])
+            's1': s1.to_numpy()
         }
         self.sock.send_pyobj(data)
         if self.sock.recv() != "Ok":
@@ -245,20 +197,17 @@ class MyStrategy:
             self.lane = LaneType.TOP
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
-            
+
         lane = self.lane
 
-        state = self.EncodeState(me, world, game)
-        cur_state_dict = state.Get(None)
-        hostile = cur_state_dict['hostile']
+        state = State.WorldState(me, world, game)
 
-        noop = Actions.NoOpAction()
-        actions = ([self.flee_action,
-                    self.advance_action] +
-                   [Actions.RangedAttack(game.map_size, lane, enemy) for enemy in hostile] +
-                   [noop] * (MAX_TARGETS_NUM - len(hostile)))
+        targets = [enemy.unit for enemy in state.enemy_states][:MAX_TARGETS_NUM]
+        actions = ([self.flee_action, self.advance_action] +
+                   [Actions.RangedAttack(game.map_size, lane, t) for t in targets] +
+                   [self.advance_action] * (MAX_TARGETS_NUM - len(targets)))
 
-        a = self.policy.Act(cur_state_dict)
+        a = self.policy.Act(state)
         reward = world.get_my_player().score - self.last_score
         if self.last_tick and world.tick_index - self.last_tick > 1:
             reward = -500
@@ -267,7 +216,7 @@ class MyStrategy:
             print 'REWARD: %.1f' % reward
 
         if self.initialized:
-            self.SaveExperience(self.last_state, self.last_action, reward, cur_state_dict)
+            self.SaveExperience(self.last_state, self.last_action, reward, state)
 
         my_move = actions[a].Act(me, world, game)
         for attr in ['speed', 'strafe_speed', 'turn', 'action', 'cast_angle', 'min_cast_distance',
@@ -275,7 +224,7 @@ class MyStrategy:
             setattr(move, attr, getattr(my_move, attr))
 
         self.last_score = world.get_my_player().score
-        self.last_state = cur_state_dict
+        self.last_state = state
         self.last_action = a
         self.initialized = True
         self.last_tick = world.tick_index
