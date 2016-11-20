@@ -127,24 +127,21 @@ def BuildTangents(u1, u2):
     result.append(BuildTangentPoint(u1, v1, alpha) + BuildTangentPoint(u2, v2, alpha))
     result.append(BuildTangentPoint(u1, v1, -alpha) + BuildTangentPoint(u2, v2, -alpha))
     return result
-    
+
 
 def SegmentCrossesCircle(p1, p2, o):
     if (o.radius < EPSILON):
         return False
     op = Point.FromUnit(o)
     if op.GetDistanceTo(p1) < o.radius - EPSILON or op.GetDistanceTo(p2) < o.radius - EPSILON:
-        # print 1
         return True
     if p1.GetDistanceTo(p2) < EPSILON:
         return False
     line = Line(p1, p2)
-    # print line
-#     print op.GetDistanceToLine(line)
     if op.GetDistanceToLine(line) > o.radius - EPSILON:
         return False
     return (op - p1).ScalarMul(p2 - p1) * (op - p2).ScalarMul(p1 - p2) > 0
-    
+
 
 def SegmentClearFromObstacles(p1, p2, obstacles):
     for o in obstacles:
@@ -201,10 +198,8 @@ def AddEdge(points, world, i1, i2, d, g, is_arc=False, circle=None):
         return
     g[i1].append((i2, d, is_arc, circle))
     g[i2].append((i1, d, is_arc, circle))
-    if d < 0:
-        print "ALARM"
-        # import pdb; pdb.set_trace()
-        
+    assert d >= 0
+
     if points[i1].GetDistanceTo(points[i2]) > d + EPSILON:
         print "WHHWAAAAAA %d %d %f" % (i1, i2, d)
         print points[i1]
@@ -213,7 +208,6 @@ def AddEdge(points, world, i1, i2, d, g, is_arc=False, circle=None):
         print circle.x
         print circle.y
         print circle.radius
-    
 def GetAngleDiff(a1, a2):
     alpha = abs(a1 - a2)
     while alpha > 2 * pi:
@@ -221,11 +215,8 @@ def GetAngleDiff(a1, a2):
     return alpha
 
 def GetArcLength(a1, a2, r):
-    # print r
-    # print a1
-    # print a2
     return GetAngleDiff(a1, a2) * r
-    
+
 def Downcast(ancestor, descendent):
     """
         automatic downcast conversion.....
@@ -235,7 +226,6 @@ def Downcast(ancestor, descendent):
 
     """
     for name, value in vars(ancestor).iteritems():
-        #print "setting descendent", name, ": ", value, "ancestor", name
         setattr(descendent, name, value)
 
     return descendent    
@@ -253,7 +243,6 @@ def FindOptimalPaths(me, units, world):
     for i, u in enumerate(units):
         circles[i] = Downcast(u, circles[i])
     units = circles
-    # print units 
     all_units = deepcopy(units)
     for o in units:
         if abs(o.speed_x) + abs(o.speed_y) > EPSILON:
@@ -298,7 +287,6 @@ def FindOptimalPaths(me, units, world):
                     points_per_unit[i].append((a1, 0, i1))
                     points_per_unit[j].append((a2, 0, i2))
                     distance = p1.GetDistanceTo(p2)
-                    # print 'distance: ' + str(p1) + str(p2) + str(distance)
                     AddEdge(points, world, i1, i2, distance, graph)
 
             intersections = IntersectCircles(u1, u2)
@@ -336,7 +324,7 @@ def CloseEnough(me, t, c):
     # import pdb; pdb.set_trace()
     return abs(me.get_distance_to_unit(t) + me.get_distance_to_unit(c[0]) - 
         t.GetDistanceTo(c[0])) < MACRO_EPSILON
-        
+
 def BuildPathAngle(me, path):
     t = None
     c = None
@@ -349,10 +337,8 @@ def BuildPathAngle(me, path):
         if CloseEnough(me, e[0], b):
             t = e[0]
             c = b
-            
+
     if t is None:
-        print 'no path from '
-        print me
         return None
     if not c[1]:
         return me.get_angle_to_unit(t)
@@ -366,7 +352,7 @@ def BuildPathAngle(me, path):
         return c1.GetAngle() - me.angle
     c2 = v_to_c.Rotate(-pi/2)
     return c2.GetAngle() - me.angle
-    
+
 # returns [[point, is_arc, circle]]
 def BuildPath(me, target, game, world):
     obstacles = BuildObstacles(me, world, game)
@@ -375,15 +361,7 @@ def BuildPath(me, target, game, world):
                                          o.radius + me.radius + TARGET_EXTRA_SPACE]
     p, prev, d, points_per_unit = FindOptimalPaths(
         me, [target] + obstacles, world)
-    # print obstacles
-    # print 'points:'
-    # print p
-    # print 'prev:'
-    # print prev
-    # print 'optimal_distances:'
-    # print d
-    
-    # import pdb; pdb.set_trace()
+
     t_id = -1
     min_d = 1e6
     for ps in points_per_unit[1]:
@@ -468,3 +446,8 @@ def HasMeleeTarget(u, world, game):
         if (t.faction != u.faction) and SectorCovers(u, a, r, t):
             return True
     return False
+    
+def TargetInRangeWithAllowance(me, target, allowance):
+    range_allowance = me.get_distance_to_unit(target) - me.cast_range + target.radius
+    return range_allowance < allowance
+    

@@ -8,6 +8,7 @@ from model.Unit import Unit
 from Geometry import Point
 from Geometry import BuildPathAngle
 from Geometry import HasMeleeTarget
+from Geometry import TargetInRangeWithAllowance
 from CachedGeometry import Cache
 from Analysis import GetAggro
 from Analysis import PickTarget
@@ -83,22 +84,16 @@ class MoveAction(object):
         self.path = None
 
     def RushToTarget(self, me, target, move, game, world):
-        # print me.x, me.y, target
         self.path = Cache.GetInstance().GetPathToTarget(me, target, game, world)
-            # print world.tick_index
-        # print self.path
         if self.path is None:
             angle = me.get_angle_to_unit(target)
         else:
             angle = BuildPathAngle(me, self.path)
         if angle is None:
             # TODO debug
-            print 'WTF'
+            # print 'WTF'
             angle = 0.3
-        # print angle
         MoveTowardsAngle(angle, move)
-
-        # print 'MV: (%.1f, %.1f) -> (%.1f, %.1f)' % (me.x, me.y, target[0], target[1])
 
         max_vector = [game.wizard_forward_speed, game.wizard_strafe_speed]
         optimal_angle = math.atan2(max_vector[1], max_vector[0])
@@ -106,7 +101,6 @@ class MoveAction(object):
         options = [angle - optimal_angle, angle + optimal_angle]
         target_angle = options[0] if abs(options[0]) < abs(options[1]) else options[1]
         move.turn = target_angle
-        # print move.turn, move.speed, move.strafe_speed
 
     def MakeFleeMove(self, me, world, game, move):
         waypoints = self.waypoints_by_lane[self.lane]
@@ -117,7 +111,6 @@ class MoveAction(object):
     def MakeAdvanceMove(self, me, world, game, move):
         waypoints = self.waypoints_by_lane[self.lane]
         i = GetNextWaypoint(waypoints, me)
-        # print i, waypoints[i]
         target = waypoints[i]
         self.RushToTarget(me, target, move, game, world)
 
@@ -131,18 +124,11 @@ class MoveAction(object):
                 t = PickTarget(me, world, game)
                 self.focus_target = t
                 self.last_target = world.tick_index
-                # print world.tick_index
-                # print t
         if t is None:
             return
-        print t.get_distance_to_unit(me)
-        print t.id, t.x, t.y
-        print t.faction, me.faction
         move.action = ActionType.MAGIC_MISSILE
         angle_to_target = me.get_angle_to_unit(t)
         distance = me.get_distance_to_unit(t)
-
-        # print 'AT: (%.1f, %.1f) -> (%.1f, %.1f)' % (me.x, me.y, self.target.x, self.target.y)
 
         move.turn = angle_to_target
         if abs(angle_to_target) > abs(math.atan2(t.radius, distance)):
@@ -159,28 +145,22 @@ class MoveAction(object):
 
 
 class FleeAction(MoveAction):
-    def __init__(self, map_size, lane, safe_distance=10):
+    def __init__(self, map_size, lane, safe_distance=20, opt_range_allowance=20):
         MoveAction.__init__(self, map_size, lane)
         self.safe_distance = safe_distance
+        self.opt_range_allowance = opt_range_allowance
 
     def Act(self, me, world, game):
-        print 'flee'
         move = Move()
         aggro = GetAggro(me, game, world, self.safe_distance)
-        # print # aggro
         target = None
         target = PickReachableTarget(me, world, game)
         if aggro > 0:
-            print 'really flee'
             self.MakeFleeMove(me, world, game, move)
-        elif (target is not None) and (
-                # we have to be able to comfortably attack
-                target.get_distance_to_unit(me) - target.radius <
-                me.cast_range - 2 * target.radius):
-            print 'really flee'
+        elif ((target is not None) and 
+              TargetInRangeWithAllowance(me, target, self.opt_range_allowance)):
             self.MakeFleeMove(me, world, game, move)
         else:
-            print 'ruuuush'
             self.MakeAdvanceMove(me, world, game, move)
 
         self.MakeMissileMove(me, world, game, move, target)
@@ -192,7 +172,6 @@ class AdvanceAction(MoveAction):
         MoveAction.__init__(self, map_size, lane)
 
     def Act(self, me, world, game):
-        # print 'advance'
         move = Move()
         self.MakeAdvanceMove(me, world, game, move)
         self.MakeMissileMove(me, world, game, move)
@@ -206,13 +185,12 @@ class RangedAttack(MoveAction):
         self.opt_range_allowance = opt_range_allowance
 
     def Act(self, me, world, game):
-        print 'ranged_attack'
         move = Move()
-        range_allowance = me.get_distance_to_unit(self.target) - me.cast_range + self.target.radius
-        if range_allowance > self.opt_range_allowance:
+        
+        if not TargetInRangeWithAllowance(me, self.target, self.opt_range_allowance):
             # import pdb; pdb.set_trace()
             self.RushToTarget(me, self.target, move, game, world)
         else:
             self.MakeFleeMove(me, world, game, move)
-        self.MakeMissileMove(me, world, game, move)
+        self.MakeMissileMove(me, world, game, move, target)
         return move
