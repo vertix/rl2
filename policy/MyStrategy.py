@@ -116,7 +116,7 @@ class RemotePolicy(object):
         epsilon = 0.5 / (1 + self.steps / 1000.)
         self.steps += 1
 
-        if np.random.rand() < epsilon:
+        if zmq and (np.random.rand() < epsilon):
             return np.random.choice(range(self.max_actions))
 
         if self.q == None: # or np.random.rand() < 0.5:
@@ -142,14 +142,14 @@ NUM_ACTIONS = 2 + MAX_TARGETS_NUM
 
 class MyStrategy:
     def __init__(self):
-        if len(sys.argv) > 1 and zmq:
+        if zmq and len(sys.argv) > 1:
             self.sock = zmq.Context().socket(zmq.REQ)
             self.sock.connect(sys.argv[1])
             print 'Connected to %s' % sys.argv[1]
         else:
             self.sock = None
 
-        if len(sys.argv) > 2 and zmq:
+        if zmq and len(sys.argv) > 2:
             self.policy = RemotePolicy(sys.argv[2], NUM_ACTIONS)
         else:
             self.policy = RemotePolicy(None, NUM_ACTIONS)
