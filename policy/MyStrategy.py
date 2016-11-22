@@ -191,7 +191,7 @@ class MyStrategy:
         @type move: Move
         """
         if self.flee_action is None:
-            if len(sys.argv) > 3:
+            if zmq and (len(sys.argv) > 3):
                 self.lane = int(sys.argv[3])
             else:
                 self.lane = LaneType.TOP
