@@ -4,7 +4,7 @@ from heapq import heappop
 
 class Cache(object):
     instance = None
-    def __init__(self, ttl=10):
+    def __init__(self, ttl=20):
         self.paths = {}
         self.times_and_keys = []
         self.ttl = ttl

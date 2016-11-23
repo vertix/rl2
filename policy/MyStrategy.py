@@ -194,7 +194,7 @@ class MyStrategy:
             if zmq and (len(sys.argv) > 3):
                 self.lane = int(sys.argv[3])
             else:
-                self.lane = LaneType.MIDDLE
+                self.lane = LaneType.TOP
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 

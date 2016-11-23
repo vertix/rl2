@@ -16,6 +16,7 @@ from Analysis import GetRemainingActionCooldown
 from Analysis import HaveEnoughTimeToTurn
 from Analysis import GetMaxForwardSpeed
 from Analysis import GetMaxStrafeSpeed
+from Analysis import FindUnitById
 from copy import deepcopy
 
 import math
@@ -26,6 +27,8 @@ WAYPOINT_RADIUS = 300 # must be less than distance between waypoints!
 TARGET_COOLDOWN = 20
 MISSILE_DISTANCE_ERROR = 10
 MARGIN = 200
+last_x = -1
+last_y = -1
 
 
 class NoOpAction(object):
@@ -56,12 +59,16 @@ def GetPrevWaypoint(waypoints, me):
     return 0
 
 
-def MoveTowardsAngle(me, game, angle, move):
+def MoveTowardsAngle(me, game, angle, move, d):
     if abs(angle) < math.pi / 2:
-        move.speed = math.cos(angle) * GetMaxForwardSpeed(me, game)
+        move.speed = math.cos(angle) * GetMaxForwardSpeed(me, game) * 100
     else:
-        move.speed = math.cos(angle) * GetMaxStrafeSpeed(me, game)
-    move.strafe_speed = math.sin(angle) * GetMaxStrafeSpeed(me, game)
+        move.speed = math.cos(angle) * GetMaxStrafeSpeed(me, game) * 100
+    move.strafe_speed = math.sin(angle) * GetMaxStrafeSpeed(me, game) * 100
+    vd = math.hypot(move.speed, move.strafe_speed)
+    if vd > d:
+        move.speed /= vd / d
+        move.strafe_speed /= vd / d
 
 
 class MoveAction(object):
@@ -88,13 +95,22 @@ class MoveAction(object):
 
     def RushToTarget(self, me, target, move, game, world):
         path = Cache.GetInstance().GetPathToTarget(me, target, game, world)
+        t_id = -1
+        angle = 0
+        d = 10
         if path is None:
             angle = me.get_angle_to_unit(target)
         else:
-            angle = path.GetNextAngle(me)
+            angle, d, t_id = path.GetNextAngleDistanceAndTarget(me)
         if angle is None:
             angle = me.get_angle_to_unit(target)
-        MoveTowardsAngle(me, game, angle, move)
+        MoveTowardsAngle(me, game, angle, move, d)
+        self.overridden_target = None
+        if t_id != -1:
+            new_target = FindUnitById(world, t_id)
+            if new_target is not None:
+                self.overridden_target = new_target
+                return
 
         max_vector = [GetMaxForwardSpeed(me, game), GetMaxStrafeSpeed(me, game)]
         optimal_angle = math.atan2(max_vector[1], max_vector[0])
@@ -102,6 +118,7 @@ class MoveAction(object):
         options = [angle - optimal_angle, angle + optimal_angle]
         target_angle = options[0] if abs(options[0]) < abs(options[1]) else options[1]
         move.turn = target_angle
+        return None
 
     def MakeFleeMove(self, me, world, game, move):
         waypoints = self.waypoints_by_lane[self.lane]
@@ -109,6 +126,7 @@ class MoveAction(object):
         target = waypoints[i]
         # print Point.FromUnit(me), target
         self.RushToTarget(me, target, move, game, world)
+            
 
     def MakeAdvanceMove(self, me, world, game, move):
         waypoints = self.waypoints_by_lane[self.lane]
@@ -117,7 +135,8 @@ class MoveAction(object):
         self.RushToTarget(me, target, move, game, world)
 
     def MakeMissileMove(self, me, world, game, move, target=None):
-        t = deepcopy(target)
+        t = (deepcopy(self.overridden_target) if self.overridden_target is not None 
+             else deepcopy(target))
         if t is None:
             if (self.focus_target != None and
                     world.tick_index < self.last_target + TARGET_COOLDOWN):

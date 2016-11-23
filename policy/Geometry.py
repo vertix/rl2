@@ -9,6 +9,7 @@ from math import sqrt
 from copy import deepcopy
 from Graph import Dijkstra
 from model.CircularUnit import CircularUnit
+from model.LivingUnit import LivingUnit
 from model.Wizard import Wizard
 from model.Minion import Minion
 from model.MinionType import MinionType
@@ -18,21 +19,32 @@ MACRO_EPSILON = 2
 MAX_OBSTACLES = 15
 TARGET_EXTRA_SPACE = 50
 INFINITY = 1e6
+TREE_DISCOUNT = 2
+WIZARD_DPS = 12.0 / 60.0 * TREE_DISCOUNT # missile every 60 ticks
+WIZARD_SPEED = 4.0  # per tick, going forward
+TICKS_TO_ACCOUNT_FOR = 10
+RADIUS_ALLOWANCE = 4
 
 class Transition(object):
-    SEGMENT = 0
-    CIRCLE = 1
-    def __init__(self, begin, end, type, circle=None):
+    def __init__(self, begin, end, edge):
         self.begin = begin
         self.end = end
-        self.type = type
-        self.circle = circle
-        if type == Transition.CIRCLE:
-            self.begin_angle = (begin - circle).GetAngle()
-            self.end_angle = (end - circle).GetAngle()      
+        self.edge = edge
+        self.circle = edge.circle
+        self.type = edge.type
+        if self.type == Edge.ARC:
+            # import pdb; pdb.set_trace()
+            self.begin_angle = (self.begin - self.circle).GetAngle()
+            self.end_angle = (self.end - self.circle).GetAngle()   
+            
+    def GetTargetId(self):
+        if self.type == Edge.STRAIGHT_SEGMENT:
+            return self.edge.target_id
+        else:
+            return -1
         
     def IsNonTrivial(self):
-        if self.type == Transition.CIRCLE and self.circle.radius < EPSILON:
+        if self.type == Edge.ARC and self.circle.radius < EPSILON:
             return False
         if self.begin.GetDistanceTo(self.end) < EPSILON:
             return False
@@ -40,37 +52,41 @@ class Transition(object):
         
     def GetDistanceTo(self, p):
         a = Point.FromUnit(p)
-        if self.type == Transition.SEGMENT:
+        if (self.type == Edge.CLEAR_SEGMENT) or (self.type == Edge.STRAIGHT_SEGMENT):
             return a.GetDistanceToSegment(self.begin, self.end)
+        # import pdb; pdb.set_trace()
         angle = (a - self.circle).GetAngle()
         if (abs(angle - self.begin_angle) + abs(angle - self.end_angle) - 
             abs(self.begin_angle - self.end_angle)) < EPSILON:
             return max(0.0, a.GetDistanceTo(self.circle) - self.circle.radius)
         return min(a.GetDistanceTo(self.begin), a.GetDistanceTo(self.end))        
         
-    def GetAngleFrom(self, u):
-        if self.type == Transition.SEGMENT:
-            return u.get_angle_to_unit(self.end)
+    def GetAngleAndDistanceFrom(self, u):
+        if self.type != Edge.ARC:
+            return (u.get_angle_to_unit(self.end), u.get_distance_to_unit(self.end))
         v_to_c = Point.FromUnit(self.circle) - u
         v_to_c_angle = v_to_c.GetAngle()
         d = u.get_distance_to_unit(self.circle)
         # print u, self.begin, self.end, self.circle
         # print self.circle.radius / d
         delta = asin(min(1.0, self.circle.radius / d))
+        if self.circle.radius > d + EPSILON:
+            delta += pi/12
+            
         if self.begin_angle < self.end_angle:
             # positive turn, therefore I should turn right
             angle = v_to_c_angle - delta
         else:
             angle = v_to_c_angle + delta
-        return NormAngle(angle - u.angle)
+        return (NormAngle(angle - u.angle), 10)
         
 
 class Path(object):
+    # waypoints = [(point, edge)]
     def __init__(self, waypoints):
         self.transitions = []
         for i, w in enumerate(waypoints[:-1]):
-            type = Transition.CIRCLE if w[1] else Transition.SEGMENT
-            t = Transition(w[0], waypoints[i+1][0], type, w[2])
+            t = Transition(w[0], waypoints[i+1][0], waypoints[i][1])
             if t.IsNonTrivial():
                 self.transitions.append(t)
     
@@ -84,12 +100,12 @@ class Path(object):
                 current = t
         return current
     
-    def GetNextAngle(self, u):
+    def GetNextAngleDistanceAndTarget(self, u):
         current = self.GetCurrentTransition(u)
         if current is None:
-            import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
             return None
-        return current.GetAngleFrom(u)    
+        return current.GetAngleAndDistanceFrom(u) + (current.GetTargetId(),)
         
 
 class Line(object):
@@ -159,7 +175,7 @@ def BuildObstacles(me, world, game):
        world.wizards + world.minions + world.trees + world.buildings 
        if me.get_distance_to_unit(unit) < me.vision_range and me.id != unit.id]
    obstacles.sort()
-   obstacles = [o for _, o in obstacles]
+   obstacles = [Obstacle(me, o) for _, o in obstacles]
    obstacles = obstacles[:MAX_OBSTACLES]
    # make all objects larger by error margin + my radius to be a point
    return obstacles
@@ -217,9 +233,9 @@ def SegmentCrossesCircle(p1, p2, o):
     return op.GetDistanceToSegment(p1, p2) < o.radius - EPSILON
 
 
-def SegmentClearFromObstacles(p1, p2, obstacles):
-    for o in obstacles:
-        if SegmentCrossesCircle(p1, p2, o):
+def SegmentClearFromObstacles(p1, p2, obstacles, ignore_id=-1):
+    for i, o in enumerate(obstacles):
+        if (i != ignore_id) and SegmentCrossesCircle(p1, p2, o):
             # import pdb; pdb.set_trace()
             return False
     return True
@@ -266,12 +282,23 @@ def AddArc(a1, a2, i1, i2):
 def Invalid(p, world):
     r = world.wizards[0].radius
     return p.x < r or p.x > world.width - r or p.y < r or p.y > world.height - r
+    
+class Edge(object):
+    CLEAR_SEGMENT = 0
+    ARC = 1
+    STRAIGHT_SEGMENT = 2
+    def __init__(self, v, w, type, circle, target_id=-1):
+        self.v = v
+        self.w = w
+        self.type = type
+        self.circle = circle
+        self.target_id = target_id
 
-def AddEdge(points, world, i1, i2, d, g, is_arc=False, circle=None):
+def AddEdge(points, world, i1, i2, d, g, type=Edge.CLEAR_SEGMENT, circle=None, target_id=-1):
     if Invalid(points[i1], world) or Invalid(points[i2], world):
         return
-    g[i1].append((i2, d, is_arc, circle))
-    g[i2].append((i1, d, is_arc, circle))
+    g[i1].append(Edge(i2, d, type, circle, target_id))
+    g[i2].append(Edge(i1, d, type, circle, target_id))
     assert d >= 0
 
     # if points[i1].GetDistanceTo(points[i2]) > d + EPSILON:
@@ -303,36 +330,54 @@ def Downcast(ancestor, descendent):
     for name, value in vars(ancestor).iteritems():
         setattr(descendent, name, value)
 
-    return descendent    
+    return descendent
+    
+class Obstacle(CircularUnit):
+    def __init__(self, me, u):
+        CircularUnit.__init__(self, u.id, u.x, u.y, u.speed_x, u.speed_y, u.angle, u.faction, u.radius)
+        self.straight_penalty = INFINITY
+        if me.faction != u.faction:
+            self.straight_penalty = u.life / WIZARD_DPS * WIZARD_SPEED
+            
+# returns segment1, segment2, where each segment is [(alpha1, point1), (alpha2, point2)]
+# for corresponding circle
+def BuildStraightSegments(c1, c2):
+    c2p = Point.FromUnit(c2)
+    c1p = Point.FromUnit(c1)
+    v12 = c2p - c1p
+    if v12.Norm() < EPSILON:
+        return ([(0, c1p), (0, c1p)], [(0, c2p), (0, c2p)])
+    v12 *= 1 / v12.Norm()
+    p11 = c1p + (v12 * (-c1.radius))
+    p12 = c1p + (v12 * (c1.radius))
+
+    p21 = c2p + (v12 * (-c2.radius))
+    p22 = c2p + (v12 * (c2.radius))
+    return ([((p11 - c1p).GetAngle(), p11),
+             ((p12 - c1p).GetAngle(), p12)
+            ],
+            [((p21 - c2p).GetAngle(), p21),
+             ((p22 - c2p).GetAngle(), p22)])
 
 # target = (x, y)
 # units = list(CircularUnit)
 # TODO(vyakunin): decide on a better interface
 # returns [(point, previous_point_no, shortest_distance)], points_per_unit: list(list(int)))
 def FindOptimalPaths(me, units, world):
-    me_point = deepcopy(me)
+    me_point = Obstacle(me, me)
     me_point.radius = 0
-    # import pdb; pdb.set_trace()
-    circles = [CircularUnit(None, None, None, None, None, None, None, None)
-               for _ in range(len(units))]
-    for i, u in enumerate(units):
-        circles[i] = Downcast(u, circles[i])
-    units = circles
     all_units = deepcopy(units)
     for o in units:
         if abs(o.speed_x) + abs(o.speed_y) > EPSILON:
             new_o = deepcopy(o)
-            new_o.x += o.speed_x
-            new_o.y += o.speed_y
+            new_o.x += o.speed_x * TICKS_TO_ACCOUNT_FOR
+            new_o.y += o.speed_y * TICKS_TO_ACCOUNT_FOR
             all_units.append(new_o)
     for o in all_units:  
-        o.radius = o.radius + me.radius + 5
+        o.radius = o.radius + me.radius + RADIUS_ALLOWANCE
         if me.get_distance_to_unit(o) < o.radius + EPSILON:
             o.radius = max(0, me.get_distance_to_unit(o) - EPSILON)
     all_units = [me_point] + all_units
-    
-
-        
     
     # points[i]: Point
     points = []
@@ -365,16 +410,46 @@ def FindOptimalPaths(me, units, world):
                     AddEdge(points, world, i1, i2, distance, graph)
 
             intersections = IntersectCircles(u1, u2)
-            if intersections is None:
-               continue
-            p, a = intersections
-            i1 = len(points)
-            i2 = i1 + 1
-            points.extend(p)
-            graph.append([])
-            graph.append([])
-            points_per_unit[i].extend(AddArc(a[0][0], a[0][1], i1, i2))
-            points_per_unit[j].extend(AddArc(a[1][1], a[1][0], i2, i1))
+            if intersections is not None:
+                p, a = intersections
+                i1 = len(points)
+                i2 = i1 + 1
+                points.extend(p)
+                graph.append([])
+                graph.append([])
+                points_per_unit[i].extend(AddArc(a[0][0], a[0][1], i1, i2))
+                points_per_unit[j].extend(AddArc(a[1][1], a[1][0], i2, i1))
+            
+            # segment = [(alpha1, point1), (alpha2, point2)]
+            if i > (len(all_units) + 4) / 5:
+                continue
+            if u2.straight_penalty > INFINITY / 2:
+                continue
+            if (i > 0) and (u2.straight_penalty > INFINITY / 2):
+                continue
+            segment1, segment2 = BuildStraightSegments(u1, u2)
+            if SegmentClearFromObstacles(segment1[0][1], segment1[1][1], all_units, i):
+                i11 = len(points)
+                i12 = i11 + 1
+                points.extend([p[1] for p in segment1])
+                graph.append([])
+                graph.append([])
+                points_per_unit[i].extend([(segment1[0][0], 0, i11), (segment1[1][0], 0, i12)])
+                AddEdge(points, world, i11, i12,
+                        segment1[0][1].GetDistanceTo(segment1[1][1]) + u1.straight_penalty, 
+                        graph, Edge.STRAIGHT_SEGMENT, None, u1.id)
+            if SegmentClearFromObstacles(segment2[0][1], segment2[1][1], all_units, j):
+                i11 = len(points)
+                i12 = i11 + 1
+                points.extend([p[1] for p in segment2])
+                graph.append([])
+                graph.append([])
+                points_per_unit[j].extend([(segment2[0][0], 0, i11), (segment2[1][0], 0, i12)])
+                AddEdge(points, world, i11, i12,
+                        segment2[0][1].GetDistanceTo(segment2[1][1]) + u2.straight_penalty, 
+                        graph, Edge.STRAIGHT_SEGMENT, None, u2.id)
+            
+            
     for unit_index, p in enumerate(points_per_unit):
         u = all_units[unit_index]
         p.sort()
@@ -386,22 +461,25 @@ def FindOptimalPaths(me, units, world):
             if p[i-1][1] == 0 and p[i][1] == 0:
                 AddEdge(points, world, p[i-1][2], p[i][2], 
                         GetArcLength(p[i-1][0], p[i][0], all_units[unit_index].radius),
-                        graph, is_arc=True, circle=u)
+                        graph, type=Edge.ARC, circle=u)
         # leave just list of point numbers
         points_per_unit[unit_index] = [k for _, __, k in p if k != -1]
-    optimal_distances, previous_points = Dijkstra(graph)
-    return (points, previous_points, optimal_distances, points_per_unit)
+        
+    optimal_distances, prev = Dijkstra(graph)
+    return (points, prev, optimal_distances, points_per_unit)
     
 
 # returns [[point, is_arc, circle]]
 def BuildPath(me, target, game, world):
     obstacles = BuildObstacles(me, world, game)
-    target = CircularUnit(0, target.x, target.y, 0, 0, 0, 0, 0)
+    if isinstance(target, LivingUnit):
+        t = deepcopy(target)
+    else:
+        t = LivingUnit(0, target.x, target.y, 0, 0, 0, 0, 0, 0, 0, [])
     obstacles = [o for o in obstacles if o.get_distance_to_unit(target) > 
                                          o.radius + me.radius + TARGET_EXTRA_SPACE]
     p, prev, d, points_per_unit = FindOptimalPaths(
-        me, [target] + obstacles, world)
-
+        me, [Obstacle(me, t)] + obstacles, world)
     t_id = -1
     min_d = INFINITY
     for ps in points_per_unit[1]:
@@ -413,15 +491,15 @@ def BuildPath(me, target, game, world):
         # print 'no way to ' + str(target)
         return None
     # import pdb; pdb.set_trace()
-    path = [(p[t_id], prev[t_id])]
+    path = [(p[t_id], prev[t_id][1])]
     
     while prev[t_id][0] != -1:
         t_id = prev[t_id][0]
-        path.append((p[t_id], prev[t_id]))
+        path.append((p[t_id], prev[t_id][1]))
     path.reverse()
     
     for i, p in enumerate(path[:-1]):
-        path[i] = [path[i][0]] + list(path[i+1][1][1:])
+        path[i] = (path[i][0], path[i+1][1])
     return Path(path)
     
 def SegmentsIntersect(l1, r1, l2, r2):

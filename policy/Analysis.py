@@ -3,24 +3,28 @@ from model.MinionType import MinionType
 from model.Building import Building
 from model.ActionType import ActionType
 from model.StatusType import StatusType
+from model.BuildingType import BuildingType
 from Geometry import RangeAllowance
 
 
 WIZARD = 100
 WOODCUTTER = 20
 FETISH = 40
-TOWER = 150
+TOWER = 70
+BASE = 100
 CAST_RANGE_ERROR = 5
+EPSILON = 1e-4
+INFINITY = 1e6
 
 def Closest(x, units):
-    res = 1e6
+    res = INFINITY
     for u in units:
         d = u.get_distance_to_unit(x)
         res = min(res, d)
     return res
     
 def ClosestUnit(x, units):
-    res = 1e6
+    res = INFINITY
     a = None
     for u in units:
         d = u.get_distance_to_unit(x)
@@ -34,7 +38,7 @@ def PickReachableTarget(me, world, game):
                (e.faction != me.faction) and (e.faction != Faction.NEUTRAL) and 
                (e.faction != Faction.OTHER) and (
                 e.get_distance_to_unit(me) < me.cast_range + e.radius - CAST_RANGE_ERROR)] 
-    min_hp = 1e6
+    min_hp = INFINITY
     best = None
     for e in enemies:
         if isinstance(e, Building):
@@ -49,11 +53,31 @@ def PickTarget(me, world, game):
     if best is None:
         enemies = [e for e in world.wizards + world.minions + world.buildings if
                    (e.faction != me.faction) and (e.faction != Faction.NEUTRAL) and 
-                   (e.faction != Faction.OTHER) and (e.get_distance_to_unit(me) < 700)]
+                   (e.faction != Faction.OTHER) and 
+                   (e.get_distance_to_unit(me) < me.vision_range)]
 
         return ClosestUnit(me, enemies)
     return best
+    
+def NeutralMinionInactive(m):
+    return ((abs(m.speed_x) + abs(m.speed_y) < EPSILON) and
+            m.life == m.max_life)
+    
+def GetMinionAggro(me, m, game, world, safe_distance):
+    if ((m.faction == me.faction) or 
+        ((m.faction == Faction.NEUTRAL) and NeutralMinionInactive(m)) or 
+        (m.faction == Faction.OTHER)):
+        return 0
 
+    d = m.get_distance_to_unit(me)
+    if d > m.vision_range + EPSILON:
+        return 0
+    if m.type == MinionType.ORC_WOODCUTTER:
+        if Closest(m, allies) > d - safe_distance:
+            return WOODCUTTER
+    if d - me.radius < game.fetish_blowdart_attack_range + safe_distance:
+        if Closest(m, allies) > d - safe_distance:
+            return FETISH
 
 def GetAggro(me, game, world, safe_distance):
     allies = [a for a in world.wizards + world.minions + world.buildings if
@@ -65,23 +89,14 @@ def GetAggro(me, game, world, safe_distance):
         if (w.faction != me.faction) and (d - me.radius < w.cast_range + safe_distance):
             aggro += WIZARD
     for m in world.minions:
-        if ((m.faction != me.faction) and (m.faction != Faction.NEUTRAL) and 
-            (m.faction != Faction.OTHER)):
-            d = m.get_distance_to_unit(me)
-            if m.type == MinionType.ORC_WOODCUTTER:
-                if Closest(m, allies) > d - safe_distance:
-                    aggro += WOODCUTTER
-            else:
-                if d - me.radius < game.fetish_blowdart_attack_range + safe_distance:
-                    if Closest(m, allies) > d - safe_distance:
-                        aggro += FETISH
+        aggro += GetMinionAggro(me, m, game, world, safe_distance)
     for b in world.buildings:
         d = b.get_distance_to_unit(me)
-        if (b.faction != me.faction) and (d - me.radius < b.attack_range + safe_distance):
-            if Closest(b, allies) > d - safe_distance:
+        if (b.faction != me.faction) and (d < b.attack_range + safe_distance):
+            if b.type == BuildingType.GUARDIAN_TOWER:
                 aggro += TOWER
             else:
-                aggro += TOWER / 2
+                aggro += BASE
     return aggro
     
 def GetRemainingActionCooldown(w, action=ActionType.MAGIC_MISSILE):
@@ -107,3 +122,9 @@ def GetMaxStrafeSpeed(w, game):
     if StatusType.HASTENED in [s.type for s in w.statuses]:
         s *= hastened_movement_bonus_factor
     return s
+
+def FindUnitById(world, t_id):
+    for o in world.wizards + world.buildings + world.minions + world.trees:
+        if t_id == o.id:
+            return o
+    return None
