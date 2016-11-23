@@ -1,6 +1,9 @@
 from model.Faction import Faction
 from model.MinionType import MinionType
 from model.Building import Building
+from model.ActionType import ActionType
+from model.StatusType import StatusType
+from Geometry import RangeAllowance
 
 
 WIZARD = 100
@@ -62,8 +65,8 @@ def GetAggro(me, game, world, safe_distance):
         if (w.faction != me.faction) and (d - me.radius < w.cast_range + safe_distance):
             aggro += WIZARD
     for m in world.minions:
-        if (m.faction != me.faction and m.faction != Faction.NEUTRAL and 
-            m.faction != Faction.OTHER):
+        if ((m.faction != me.faction) and (m.faction != Faction.NEUTRAL) and 
+            (m.faction != Faction.OTHER)):
             d = m.get_distance_to_unit(me)
             if m.type == MinionType.ORC_WOODCUTTER:
                 if Closest(m, allies) > d - safe_distance:
@@ -74,9 +77,33 @@ def GetAggro(me, game, world, safe_distance):
                         aggro += FETISH
     for b in world.buildings:
         d = b.get_distance_to_unit(me)
-        if b.faction != me.faction and d - me.radius < b.attack_range + safe_distance:
+        if (b.faction != me.faction) and (d - me.radius < b.attack_range + safe_distance):
             if Closest(b, allies) > d - safe_distance:
                 aggro += TOWER
             else:
                 aggro += TOWER / 2
     return aggro
+    
+def GetRemainingActionCooldown(w, action=ActionType.MAGIC_MISSILE):
+    return max(w.remaining_action_cooldown_ticks, 
+               w.remaining_cooldown_ticks_by_action[action])
+               
+def HaveEnoughTimeToTurn(w, angle, target, game, action=ActionType.MAGIC_MISSILE):
+    speed = game.wizard_max_turn_angle
+    if StatusType.HASTENED in [s.type for s in w.statuses]:
+        speed *= hastened_rotation_bonus_factor
+    return (max((abs(angle) / speed) + 2, 
+               RangeAllowance(w, target) / GetMaxStrafeSpeed(w, game)) 
+            < GetRemainingActionCooldown(w, action))
+    
+def GetMaxForwardSpeed(w, game):
+    s = game.wizard_forward_speed
+    if StatusType.HASTENED in [s.type for s in w.statuses]:
+        s *= hastened_movement_bonus_factor
+    return s
+    
+def GetMaxStrafeSpeed(w, game):
+    s = game.wizard_strafe_speed
+    if StatusType.HASTENED in [s.type for s in w.statuses]:
+        s *= hastened_movement_bonus_factor
+    return s

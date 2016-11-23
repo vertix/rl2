@@ -1,6 +1,7 @@
 from math import pi
 from math import hypot
 from math import acos
+from math import asin
 from math import cos
 from math import sin
 from math import atan2
@@ -16,6 +17,80 @@ EPSILON = 1E-4
 MACRO_EPSILON = 2
 MAX_OBSTACLES = 15
 TARGET_EXTRA_SPACE = 50
+INFINITY = 1e6
+
+class Transition(object):
+    SEGMENT = 0
+    CIRCLE = 1
+    def __init__(self, begin, end, type, circle=None):
+        self.begin = begin
+        self.end = end
+        self.type = type
+        self.circle = circle
+        if type == Transition.CIRCLE:
+            self.begin_angle = (begin - circle).GetAngle()
+            self.end_angle = (end - circle).GetAngle()      
+        
+    def IsNonTrivial(self):
+        if self.type == Transition.CIRCLE and self.circle.radius < EPSILON:
+            return False
+        if self.begin.GetDistanceTo(self.end) < EPSILON:
+            return False
+        return True
+        
+    def GetDistanceTo(self, p):
+        a = Point.FromUnit(p)
+        if self.type == Transition.SEGMENT:
+            return a.GetDistanceToSegment(self.begin, self.end)
+        angle = (a - self.circle).GetAngle()
+        if (abs(angle - self.begin_angle) + abs(angle - self.end_angle) - 
+            abs(self.begin_angle - self.end_angle)) < EPSILON:
+            return max(0.0, a.GetDistanceTo(self.circle) - self.circle.radius)
+        return min(a.GetDistanceTo(self.begin), a.GetDistanceTo(self.end))        
+        
+    def GetAngleFrom(self, u):
+        if self.type == Transition.SEGMENT:
+            return u.get_angle_to_unit(self.end)
+        v_to_c = Point.FromUnit(self.circle) - u
+        v_to_c_angle = v_to_c.GetAngle()
+        d = u.get_distance_to_unit(self.circle)
+        # print u, self.begin, self.end, self.circle
+        # print self.circle.radius / d
+        delta = asin(min(1.0, self.circle.radius / d))
+        if self.begin_angle < self.end_angle:
+            # positive turn, therefore I should turn right
+            angle = v_to_c_angle - delta
+        else:
+            angle = v_to_c_angle + delta
+        return NormAngle(angle - u.angle)
+        
+
+class Path(object):
+    def __init__(self, waypoints):
+        self.transitions = []
+        for i, w in enumerate(waypoints[:-1]):
+            type = Transition.CIRCLE if w[1] else Transition.SEGMENT
+            t = Transition(w[0], waypoints[i+1][0], type, w[2])
+            if t.IsNonTrivial():
+                self.transitions.append(t)
+    
+    def GetCurrentTransition(self, u):
+        current = None
+        closest = INFINITY
+        for t in reversed(self.transitions):
+            d = t.GetDistanceTo(u)
+            if d < closest - MACRO_EPSILON:
+                closest = d
+                current = t
+        return current
+    
+    def GetNextAngle(self, u):
+        current = self.GetCurrentTransition(u)
+        if current is None:
+            import pdb; pdb.set_trace()
+            return None
+        return current.GetAngleFrom(u)    
+        
 
 class Line(object):
     def __init__(self, p1, p2):
@@ -52,6 +127,13 @@ class Point(object):
         
     def GetDistanceToLine(self, l):
         return abs(self.x * l.a + self.y * l.b + l.c) / hypot(l.a, l.b)
+        
+    def GetDistanceToSegment(self, p1, p2):
+        ans = min(self.GetDistanceTo(p1), self.GetDistanceTo(p2))
+        if ((self - p1).ScalarMul(p2 - p1) > 0) and ((self - p2).ScalarMul(p1 - p2) > 0):
+            ans = min(ans, self.GetDistanceToLine(Line(p1, p2)))
+            
+        return ans
     
     def GetAngle(self):
         return atan2(self.y, self.x)
@@ -127,20 +209,12 @@ def BuildTangents(u1, u2):
     result.append(BuildTangentPoint(u1, v1, alpha) + BuildTangentPoint(u2, v2, alpha))
     result.append(BuildTangentPoint(u1, v1, -alpha) + BuildTangentPoint(u2, v2, -alpha))
     return result
-
-
+    
 def SegmentCrossesCircle(p1, p2, o):
     if (o.radius < EPSILON):
         return False
     op = Point.FromUnit(o)
-    if op.GetDistanceTo(p1) < o.radius - EPSILON or op.GetDistanceTo(p2) < o.radius - EPSILON:
-        return True
-    if p1.GetDistanceTo(p2) < EPSILON:
-        return False
-    line = Line(p1, p2)
-    if op.GetDistanceToLine(line) > o.radius - EPSILON:
-        return False
-    return (op - p1).ScalarMul(p2 - p1) * (op - p2).ScalarMul(p1 - p2) > 0
+    return op.GetDistanceToSegment(p1, p2) < o.radius - EPSILON
 
 
 def SegmentClearFromObstacles(p1, p2, obstacles):
@@ -200,14 +274,15 @@ def AddEdge(points, world, i1, i2, d, g, is_arc=False, circle=None):
     g[i2].append((i1, d, is_arc, circle))
     assert d >= 0
 
-    if points[i1].GetDistanceTo(points[i2]) > d + EPSILON:
-        print "WHHWAAAAAA %d %d %f" % (i1, i2, d)
-        print points[i1]
-        print points[i2]
-        print is_arc
-        print circle.x
-        print circle.y
-        print circle.radius
+    # if points[i1].GetDistanceTo(points[i2]) > d + EPSILON:
+    #     print "WHHWAAAAAA %d %d %f" % (i1, i2, d)
+    #     print points[i1]
+    #     print points[i2]
+    #     print is_arc
+    #     print circle.x
+    #     print circle.y
+    #     print circle.radius
+
 def GetAngleDiff(a1, a2):
     alpha = abs(a1 - a2)
     while alpha > 2 * pi:
@@ -317,41 +392,6 @@ def FindOptimalPaths(me, units, world):
     optimal_distances, previous_points = Dijkstra(graph)
     return (points, previous_points, optimal_distances, points_per_unit)
     
-def CloseEnough(me, t, c):
-    if c[1]:
-        # import pdb; pdb.set_trace()
-        return abs(me.get_distance_to_unit(c[2]) - c[2].radius) < MACRO_EPSILON
-    # import pdb; pdb.set_trace()
-    return abs(me.get_distance_to_unit(t) + me.get_distance_to_unit(c[0]) - 
-        t.GetDistanceTo(c[0])) < MACRO_EPSILON
-
-def BuildPathAngle(me, path):
-    t = None
-    c = None
-    for i, b in enumerate(path[:-1]):
-        if b[1] and b[2].radius < EPSILON:
-            continue
-        e = path[i+1]
-        if b[0].GetDistanceTo(e[0]) < EPSILON:
-            continue
-        if CloseEnough(me, e[0], b):
-            t = e[0]
-            c = b
-
-    if t is None:
-        return None
-    if not c[1]:
-        return me.get_angle_to_unit(t)
-    c = c[2]
-    me_p = Point.FromUnit(me)
-    v_to_c = Point.FromUnit(c) - me_p
-    v_to_t = t - me_p
-    c1 = v_to_c.Rotate(pi/2)
-    if c1.ScalarMul(v_to_t) > 0:
-        # import pdb; pdb.set_trace()
-        return c1.GetAngle() - me.angle
-    c2 = v_to_c.Rotate(-pi/2)
-    return c2.GetAngle() - me.angle
 
 # returns [[point, is_arc, circle]]
 def BuildPath(me, target, game, world):
@@ -363,14 +403,14 @@ def BuildPath(me, target, game, world):
         me, [target] + obstacles, world)
 
     t_id = -1
-    min_d = 1e6
+    min_d = INFINITY
     for ps in points_per_unit[1]:
         if t_id == -1 or d[ps] < min_d:
             min_d = d[ps]
             t_id = ps
     if t_id == -1:
-        import pdb; pdb.set_trace()
-        print 'no way to ' + str(target)
+        # import pdb; pdb.set_trace()
+        # print 'no way to ' + str(target)
         return None
     # import pdb; pdb.set_trace()
     path = [(p[t_id], prev[t_id])]
@@ -382,7 +422,7 @@ def BuildPath(me, target, game, world):
     
     for i, p in enumerate(path[:-1]):
         path[i] = [path[i][0]] + list(path[i+1][1][1:])
-    return path
+    return Path(path)
     
 def SegmentsIntersect(l1, r1, l2, r2):
     if abs(l1 - l2) + abs(r1 - r2) < EPSILON:
@@ -391,17 +431,18 @@ def SegmentsIntersect(l1, r1, l2, r2):
             or ((l2 < l1 - EPSILON) and (r2 > l1 + EPSILON)))
 
 def NormAngle(a):
-    while a < -pi - EPSILON:
-        a += 2 * pi
-    while a > pi - EPSILON:
-        a -= 2 * pi
-    
+    res = a
+    while res < -pi - EPSILON:
+        res += 2 * pi
+    while res > pi - EPSILON:
+        res -= 2 * pi
+    return res
 
 def ArcsIntersect(l1, r1, l2, r2):
-    NormAngle(l1)
-    NormAngle(l2)
-    NormAngle(r1)
-    NormAngle(r2)
+    l1 = NormAngle(l1)
+    l2 = NormAngle(l2)
+    r1 = NormAngle(r1)
+    r2 = NormAngle(r2)
     a1 = [(l1, r1)]
     if l1 > r1:
         a1 = [(l1, pi), (pi, r2)]
@@ -415,21 +456,8 @@ def ArcsIntersect(l1, r1, l2, r2):
     return False
     
 def SectorCovers(u, a, r, t):
-    uc = CircularUnit(0, u.x, u.y, 0, 0, 0, 0, r)
-    if (Point.FromUnit(u) + 
-        Point(cos(u.angle) * r, sin(u.angle) * r)).GetDistanceTo(t) < t.radius - EPSILON:
-        return True
-    
-    # returns ([p1, p2], [(a1, a2), (b1, b2)]) or None, where pX - points, aX - corresponding
-    # angles on c1, bX - corresponding angles on c2 intersection goes from a1 to a2 in positive
-    # direction on c1 and in negative on c2.
-    ints = IntersectCircles(uc, t)
-    if ints is None:
-        return False
-    _, alphas = ints
-    a1, a2 = alphas[0]
-    return ArcsIntersect(u.angle - a, u.angle + a, a1, a2)
-    
+    return ((u.get_distance_to_unit(t) < r + t.radius - EPSILON) and 
+            (abs(u.get_angle_to_unit(t)) < a / 2.0 - EPSILON))
     
 def HasMeleeTarget(u, world, game):
     a = None
@@ -446,8 +474,10 @@ def HasMeleeTarget(u, world, game):
         if (t.faction != u.faction) and SectorCovers(u, a, r, t):
             return True
     return False
-    
+
+def RangeAllowance(me, target):
+    return me.cast_range - (me.get_distance_to_unit(target) - target.radius)
+
 def TargetInRangeWithAllowance(me, target, allowance):
-    range_allowance = me.get_distance_to_unit(target) - me.cast_range + target.radius
-    return range_allowance < allowance
+    return RangeAllowance(me, target) > allowance
     

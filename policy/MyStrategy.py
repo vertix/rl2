@@ -73,32 +73,37 @@ class QFunction(object):
         res = np.argmax(value)
         return res, value[res]
 
+MAX_ATTACK_DISTANCE = 1000
+
 
 class DefaultPolicy(object):
     def __init__(self, lane):
-	self.lane = lane
-	self.target = 0
-	self.ticks_on_target = 0
+        self.lane = lane
+        self.target = 0
+        self.ticks_on_target = 0
 
     def Act(self, state):
-	if state.my_state.hp < 50:
-            res = 0 + self.lane  # FLEE
-	    self.ticks_on_target = 100
-        elif state.enemy_states:
-	    if self.ticks_on_target > 50:
-		self.ticks_on_target = 0
-		self.target = random.choice(
-		    range(min(MAX_TARGETS_NUM, len(state.enemy_states))))
-            res = 6 + self.target   # RANGE ATTACK CLOSEST
-	    self.ticks_on_target += 1
+        enemies = [s for s in state.enemy_states
+                   if s.dist < MAX_ATTACK_DISTANCE]
+
+        if state.my_state.hp < 50:
+            res = 0# FLEE
+            self.ticks_on_target = 100
+        elif enemies:
+            if self.ticks_on_target > 50:
+                self.ticks_on_target = 0
+                self.target = random.choice(
+                    range(min(MAX_TARGETS_NUM, len(enemies))))
+            res = 2 + self.target   # RANGE ATTACK CLOSEST
+            self.ticks_on_target += 1
         else:
-	    self.ticks_on_target = 100
-            res = 3 + self.lane  # ADVANCE
-	print res
-	return res
+            self.ticks_on_target = 100
+            res = 1 # ADVANCE
+        print res
+        return res
 
     def Stop(self):
-	pass
+    	pass
 
 
 class RemotePolicy(object):
@@ -140,19 +145,6 @@ class RemotePolicy(object):
         epsilon = 0.5 / (1 + self.steps / 1000.)
         self.steps += 1
 
-        if np.random.rand() < epsilon or self.q is None:
-            return np.random.choice(range(self.max_actions))
-
-        # if self.q == None: # or np.random.rand() < 0.5:
-        #     if state.my_state.hp < 50:
-        #         # print 'FLEE'
-        #         return 0  # FLEE
-        #     elif state.enemy_states:
-        #         return 2  # RANGE ATTACK CLOSEST
-        #     else:
-        #         # print 'ADVANCE'
-        #         return 1  # ADVANCE
-        # else:
         res, val = self.q.Select(state)
         action = (['FLEE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
                   ['ADVANCE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
@@ -168,7 +160,7 @@ LANES = [LaneType.TOP, LaneType.MIDDLE, LaneType.BOTTOM]
 
 class MyStrategy:
     def __init__(self):
-        if len(sys.argv) > 1 and zmq:
+        if zmq and len(sys.argv) > 1:
             self.sock = zmq.Context().socket(zmq.REQ)
             self.sock.connect(sys.argv[1])
             print 'Connected to %s' % sys.argv[1]
@@ -188,8 +180,8 @@ class MyStrategy:
 
         self.exp = {'s':[], 'a': [], 'r': [], 's1': []}
         self.next_file_index = 0
-        self.flee_actions = []
-        self.advance_actions = []
+        self.flee_action = None
+        self.advance_action = None
 
     def stop(self):
         self.SaveExperience(self.last_state, self.last_action, 0, None)
@@ -216,20 +208,21 @@ class MyStrategy:
         @type game: Game
         @type move: Move
         """
-        if not self.flee_actions:
-            for lane in LANES:
-                self.flee_actions.append(Actions.FleeAction(game.map_size, lane))
-                self.advance_actions.append(Actions.AdvanceAction(game.map_size, lane))
+        if self.flee_action is None:
+            if zmq and (len(sys.argv) > 3):
+                self.lane = int(sys.argv[3])
+            else:
+                self.lane = np.random.choice(LANES)
+            self.flee_action = Actions.FleeAction(game.map_size, self.lane)
+            self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 
         state = State.WorldState(me, world, game)
         noop = Actions.NoOpAction()
 
-        targets = [enemy.unit for enemy in state.enemy_states][:MAX_TARGETS_NUM]
-        actions = (self.flee_actions + self.advance_actions +
-                   [Actions.RangedAttack(
-                       game.map_size,
-                       random.choice([LaneType.TOP, LaneType.MIDDLE, LaneType.BOTTOM]), t)
-                    for t in targets] +
+        targets = [enemy.unit for enemy in state.enemy_states
+                   if enemy.dist < 1000][:MAX_TARGETS_NUM]
+        actions = ([self.flee_action, self.advance_action] +
+                   [Actions.RangedAttack(game.map_size, self.lane, t) for t in targets] +
                    [noop] * (MAX_TARGETS_NUM - len(targets)))
 
         a = self.policy.Act(state)
