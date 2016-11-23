@@ -78,6 +78,7 @@ def GetMinionAggro(me, allies, m, game, world, safe_distance):
     if d - me.radius < game.fetish_blowdart_attack_range + safe_distance:
         if Closest(m, allies) > d - safe_distance:
             return FETISH
+    return 0
 
 def GetAggro(me, game, world, safe_distance):
     allies = [a for a in world.wizards + world.minions + world.buildings if
