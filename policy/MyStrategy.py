@@ -99,7 +99,7 @@ class DefaultPolicy(object):
         else:
             self.ticks_on_target = 100
             res = 1 # ADVANCE
-        print res
+        # print res
         return res
 
     def Stop(self):
@@ -145,9 +145,14 @@ class RemotePolicy(object):
         epsilon = 0.5 / (1 + self.steps / 1000.)
         self.steps += 1
 
+        if np.random.rand() < epsilon or self.q is None:
+            return np.random.randint(0, self.max_actions)
+
         res, val = self.q.Select(state)
-        action = (['FLEE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
-                  ['ADVANCE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
+        # action = (['FLEE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
+        #           ['ADVANCE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
+        #           ['ATTACK_%d' %i for i in range(1, MAX_TARGETS_NUM + 1)])[res]
+        action = (['FLEE', 'ADVANCE'] +
                   ['ATTACK_%d' %i for i in range(1, MAX_TARGETS_NUM + 1)])[res]
         if action != self.last_action:
             self.last_action = action
@@ -155,7 +160,7 @@ class RemotePolicy(object):
         return res
 
 
-NUM_ACTIONS = 6 + MAX_TARGETS_NUM
+NUM_ACTIONS = 2 + MAX_TARGETS_NUM
 LANES = [LaneType.TOP, LaneType.MIDDLE, LaneType.BOTTOM]
 
 class MyStrategy:
@@ -177,6 +182,7 @@ class MyStrategy:
         self.last_state = {}
         self.last_action = -1
         self.last_tick = None
+        self.num_deaths = 0
 
         self.exp = {'s':[], 'a': [], 'r': [], 's1': []}
         self.next_file_index = 0
@@ -185,10 +191,19 @@ class MyStrategy:
 
     def stop(self):
         self.SaveExperience(self.last_state, self.last_action, 0, None)
+        if self.sock:
+            self.sock.send_pyobj({
+                'type':'stat',
+                'data': {
+                    'Stats/Score': self.last_score,
+                    'Stats/Length': self.last_tick,
+                    'Stats/Num Deaths': self.num_deaths
+                }})
+            print 'Saving stats'
         self.policy.Stop()
 
     def SaveExperience(self, s, a, r, s1):
-        if not self.sock:
+        if not self.sock or not s:
             return
 
         data = {
@@ -197,7 +212,7 @@ class MyStrategy:
             'r': r,
             's1': s1.to_numpy() if s1 else None
         }
-        self.sock.send_pyobj(data)
+        self.sock.send_pyobj({'type': 'exp', 'data':data})
         if self.sock.recv() != "Ok":
             print "Error when sending experience"
 
@@ -229,6 +244,7 @@ class MyStrategy:
         reward = world.get_my_player().score - self.last_score
         if self.last_tick and world.tick_index - self.last_tick > 1:
             reward = -500
+            self.num_deaths += 1
 
         if reward != 0:
             print 'REWARD: %.1f' % reward
