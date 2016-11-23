@@ -92,6 +92,7 @@ class MoveAction(object):
         for key in self.waypoints_by_lane:
             self.waypoints_by_lane[key] = [start] + self.waypoints_by_lane[key] + [end]
         self.focus_target = None
+        self.last_target = 0
 
     def RushToTarget(self, me, target, move, game, world):
         path = Cache.GetInstance().GetPathToTarget(me, target, game, world)

@@ -50,9 +50,9 @@ class QFunction(object):
         state = BatchNorm(state, self.vars, 'model/hidden1/BatchNorm')
         state = ReLu(state)
 
-        state = np.matmul(state, self.vars['model/hidden2/weights:0'])
-        state = BatchNorm(state, self.vars, 'model/hidden2/BatchNorm')
-        state = ReLu(state)
+        # state = np.matmul(state, self.vars['model/hidden2/weights:0'])
+        # state = BatchNorm(state, self.vars, 'model/hidden2/BatchNorm')
+        # state = ReLu(state)
 
         value = np.matmul(state, self.vars['model/val_hid/weights:0'])
         value = BatchNorm(value, self.vars, 'model/val_hid/BatchNorm')
@@ -256,7 +256,7 @@ class MyStrategy:
         a = self.policy.Act(state)
         reward = world.get_my_player().score - self.last_score
         if self.last_tick and world.tick_index - self.last_tick > 1:
-            reward = -500
+            # reward = -500
             self.num_deaths += 1
 
         if reward != 0:

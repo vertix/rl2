@@ -62,8 +62,8 @@ def PickTarget(me, world, game):
 def NeutralMinionInactive(m):
     return ((abs(m.speed_x) + abs(m.speed_y) < EPSILON) and
             m.life == m.max_life)
-    
-def GetMinionAggro(me, m, game, world, safe_distance):
+
+def GetMinionAggro(me, allies, m, game, world, safe_distance):
     if ((m.faction == me.faction) or 
         ((m.faction == Faction.NEUTRAL) and NeutralMinionInactive(m)) or 
         (m.faction == Faction.OTHER)):
@@ -89,7 +89,7 @@ def GetAggro(me, game, world, safe_distance):
         if (w.faction != me.faction) and (d - me.radius < w.cast_range + safe_distance):
             aggro += WIZARD
     for m in world.minions:
-        aggro += GetMinionAggro(me, m, game, world, safe_distance)
+        aggro += GetMinionAggro(me, allies, m, game, world, safe_distance)
     for b in world.buildings:
         d = b.get_distance_to_unit(me)
         if (b.faction != me.faction) and (d < b.attack_range + safe_distance):
@@ -106,7 +106,7 @@ def GetRemainingActionCooldown(w, action=ActionType.MAGIC_MISSILE):
 def HaveEnoughTimeToTurn(w, angle, target, game, action=ActionType.MAGIC_MISSILE):
     speed = game.wizard_max_turn_angle
     if StatusType.HASTENED in [s.type for s in w.statuses]:
-        speed *= hastened_rotation_bonus_factor
+        speed *= game.hastened_rotation_bonus_factor
     return (max((abs(angle) / speed) + 2, 
                RangeAllowance(w, target) / GetMaxStrafeSpeed(w, game)) 
             < GetRemainingActionCooldown(w, action))
@@ -114,13 +114,13 @@ def HaveEnoughTimeToTurn(w, angle, target, game, action=ActionType.MAGIC_MISSILE
 def GetMaxForwardSpeed(w, game):
     s = game.wizard_forward_speed
     if StatusType.HASTENED in [s.type for s in w.statuses]:
-        s *= hastened_movement_bonus_factor
+        s *= game.hastened_movement_bonus_factor
     return s
     
 def GetMaxStrafeSpeed(w, game):
     s = game.wizard_strafe_speed
     if StatusType.HASTENED in [s.type for s in w.statuses]:
-        s *= hastened_movement_bonus_factor
+        s *= game.hastened_movement_bonus_factor
     return s
 
 def FindUnitById(world, t_id):

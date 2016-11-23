@@ -557,4 +557,4 @@ def RangeAllowance(me, target):
 
 def TargetInRangeWithAllowance(me, target, allowance):
     return RangeAllowance(me, target) > allowance
-    
+
