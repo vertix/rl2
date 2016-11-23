@@ -66,7 +66,7 @@ def MoveTowardsAngle(me, game, angle, move, d):
         move.speed = math.cos(angle) * GetMaxStrafeSpeed(me, game) * 100
     move.strafe_speed = math.sin(angle) * GetMaxStrafeSpeed(me, game) * 100
     vd = math.hypot(move.speed, move.strafe_speed)
-    if vd > d:
+    if vd > d and d != 0:
         move.speed /= vd / d
         move.strafe_speed /= vd / d
 
