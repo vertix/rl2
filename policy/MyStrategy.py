@@ -162,6 +162,8 @@ class RemotePolicy(object):
 
 NUM_ACTIONS = 2 + MAX_TARGETS_NUM
 LANES = [LaneType.TOP, LaneType.MIDDLE, LaneType.BOTTOM]
+GAMMA = 0.995
+Q_N_STEPS = 20
 
 class MyStrategy:
     def __init__(self):
@@ -184,7 +186,7 @@ class MyStrategy:
         self.last_tick = None
         self.num_deaths = 0
 
-        self.exp = {'s':[], 'a': [], 'r': [], 's1': []}
+        self.exps = []
         self.next_file_index = 0
         self.flee_action = None
         self.advance_action = None
@@ -206,15 +208,26 @@ class MyStrategy:
         if not self.sock or not s:
             return
 
-        data = {
+        s1 = s1.to_numpy() if s1 else None
+
+        self.exps.append({
             's': s.to_numpy(),
             'a': a,
             'r': r,
-            's1': s1.to_numpy() if s1 else None
-        }
-        self.sock.send_pyobj({'type': 'exp', 'data':data})
-        if self.sock.recv() != "Ok":
-            print "Error when sending experience"
+            's1': s1
+        })
+
+        if s1 is None or len(self.exps) >= Q_N_STEPS:
+            rew = 0.
+            for exp in reversed(self.exps):
+                rew += GAMMA * exp['r']
+                exp['s1'] = s1
+                exp['r'] = rew
+
+                self.sock.send_pyobj({'type': 'exp', 'data': exp})
+                if self.sock.recv() != "Ok":
+                    print "Error when sending experience"
+            self.exps = []
 
     def move(self, me, world, game, move):
         """
@@ -227,6 +240,7 @@ class MyStrategy:
             if zmq and (len(sys.argv) > 3):
                 self.lane = int(sys.argv[3])
             else:
+                # self.lane = LaneType.MIDDLE
                 self.lane = np.random.choice(LANES)
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)

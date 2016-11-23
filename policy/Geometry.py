@@ -87,7 +87,6 @@ class Path(object):
     def GetNextAngle(self, u):
         current = self.GetCurrentTransition(u)
         if current is None:
-            import pdb; pdb.set_trace()
             return None
         return current.GetAngleFrom(u)    
         
