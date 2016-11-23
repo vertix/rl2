@@ -12,16 +12,35 @@ from model.Move import Move
 from model.Wizard import Wizard
 from model.World import World
 
+# Ideas for features
+# Exp for hit
+# Exp for kill
+# Damage
+# Av. damage per tick OR Max cooldown
+# Regeneration per tick
+# Verify that wizard bonuses are used in State
+# Received damage per last N ticks.
+# Current tick
 
 class State(object):
     """Base class for state"""
-    def to_numpy(self):
+    def __init__(self):
+        self.numpy_cache = None
+
+    def _to_numpy_internal(self):
         raise NotImplementedError
+
+    def to_numpy(self):
+        if self.numpy_cache is None:
+            self.numpy_cache = self._to_numpy_internal()
+        return self.numpy_cache
+
 
 #TODO(vertix): Introduce damage into state
 
 class LivingUnitState(State):
     def __init__(self, unit, me, game):
+        super(LivingUnitState, self).__init__()
         self.unit = unit
         self.me = me
         self.game = game
@@ -95,7 +114,7 @@ class LivingUnitState(State):
     @property
     def cooldown_ticks(self):
         """Ticks left to attack"""
-        return 0.
+        return self.unit.remaining_action_cooldown_ticks
 
     @property
     def enemy(self):
@@ -107,7 +126,7 @@ class LivingUnitState(State):
         """1. if neutral unit, else 0."""
         return 1. if self.unit.faction > Faction.RENEGADES else 0.
 
-    def to_numpy(self):
+    def _to_numpy_internal(self):
         return np.array([
             self.hp, self.max_hp, self.mana, self.max_mana,
             self.position[0], self.position[1], self.radius, self.speed[0], self.speed[1],
@@ -191,10 +210,6 @@ class WizardState(LivingUnitState):
     def attack_range(self):
         return self.unit.cast_range
 
-    @property
-    def cooldown_ticks(self):
-        return self.unit.remaining_action_cooldown_ticks
-
 
 class BuildingState(LivingUnitState):
     def __init__(self, b, me, game):
@@ -203,10 +218,6 @@ class BuildingState(LivingUnitState):
     @property
     def attack_range(self):
         return self.unit.attack_range
-
-    @property
-    def cooldown_ticks(self):
-        return self.unit.remaining_action_cooldown_ticks
 
 
 class MinionState(LivingUnitState):
@@ -220,16 +231,15 @@ class MinionState(LivingUnitState):
         else:
             return self.game.fetish_blowdart_attack_range
 
-    @property
-    def cooldown_ticks(self):
-        return self.unit.remaining_action_cooldown_ticks
+    # TODO: Rewrite enemy to handle neutral minions that became aggressive. 
+
 
 
 class MyState(WizardState):
     def __init__(self, me, game):
         super(MyState, self).__init__(me, me, game)
 
-    def to_numpy(self):
+    def _to_numpy_internal(self):
         return np.array([
             self.hp, self.max_hp, self.mana, self.max_mana,
             self.position[0], self.position[1], self.radius, self.speed[0], self.speed[1],
@@ -258,7 +268,7 @@ class WorldState(State):
         self.enemy_states = [s for s in states if s.enemy][:MAX_ENEMIES]
         self.friend_states = [s for s in states if not s.enemy][:MAX_FRIENDS]
 
-    def to_numpy(self):
+    def _to_numpy_internal(self):
         return np.hstack([self.my_state.to_numpy()] +
                          [s.to_numpy() for s in self.enemy_states] +
                          [ZERO_NUMPY] * (MAX_ENEMIES - len(self.enemy_states)) +

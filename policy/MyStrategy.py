@@ -124,6 +124,8 @@ class RemotePolicy(object):
         self.steps = 0
         self.max_actions = max_actions
         self.last_action = None
+        self.actions_debug = (['FLEE', 'ADVANCE'] + 
+                              ['ATTACK_%d' %i for i in range(1, MAX_TARGETS_NUM + 1)])
 
     def Stop(self):
         if self._stop:
@@ -152,8 +154,7 @@ class RemotePolicy(object):
         # action = (['FLEE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
         #           ['ADVANCE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
         #           ['ATTACK_%d' %i for i in range(1, MAX_TARGETS_NUM + 1)])[res]
-        action = (['FLEE', 'ADVANCE'] +
-                  ['ATTACK_%d' %i for i in range(1, MAX_TARGETS_NUM + 1)])[res]
+        action = self.actions_debug[res]
         if action != self.last_action:
             self.last_action = action
             print '%s: %.2f' % (action, val)
