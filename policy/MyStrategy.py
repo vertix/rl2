@@ -192,13 +192,19 @@ class MyStrategy:
         self.flee_action = None
         self.advance_action = None
 
-    def stop(self):
-        self.SaveExperience(self.last_state, self.last_action, 0, None)
+    def stop(self, final_score=None):
+        r = 0.
+        if final_score is not None:
+            r = final_score - self.last_score
+            print 'Final score is %d' % final_score
+            print 'Final reward is %d' % r
+
+        self.SaveExperience(self.last_state, self.last_action, r, None)
         if self.sock:
             self.sock.send_pyobj({
                 'type':'stat',
                 'data': {
-                    'Stats/Score': self.last_score,
+                    'Stats/Score': self.last_score + r,
                     'Stats/Length': self.last_tick,
                     'Stats/Num Deaths': self.num_deaths
                 }})

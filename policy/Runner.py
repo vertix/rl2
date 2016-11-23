@@ -1,4 +1,6 @@
+import os
 import sys
+import time
 
 from MyStrategy import MyStrategy
 from RemoteProcessClient import RemoteProcessClient
@@ -52,7 +54,17 @@ class Runner:
             # END GAME
             for s in strategies:
                 if hasattr(s, 'stop'):
-                    s.stop()
+                    # res_path = '../local-runner/result.txt'
+                    res_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                                            '../local-runner/result.txt')
+                    print res_path
+                    last_reward = None
+                    if time.time() - os.path.getmtime(res_path) < 3.:
+                        with open(res_path) as f:
+                            lines = f.readlines()
+                            result = lines[2].strip().split()
+                            last_reward = int(result[1])
+                    s.stop(last_reward)
 
             self.remote_process_client.close()
 
