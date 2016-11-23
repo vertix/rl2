@@ -257,6 +257,8 @@ class WorldState(State):
     def __init__(self, me, world, game):
         super(WorldState, self).__init__()
         self.my_state = MyState(me, game)
+        self.world = world
+        self.game = game
 
         states = [WizardState(w, me, game) for w in world.wizards if w != me]
         states += [MinionState(m, me, game) for m in world.minions
@@ -268,9 +270,15 @@ class WorldState(State):
         self.enemy_states = [s for s in states if s.enemy][:MAX_ENEMIES]
         self.friend_states = [s for s in states if not s.enemy][:MAX_FRIENDS]
 
+    @property
+    def ticks_until_end(self):
+        """Returns 1 in the beginning of episode and 0 in its end. Computed from ticks"""
+        return self.world.tick_count - self.world.tick_index
+
     def _to_numpy_internal(self):
         return np.hstack([self.my_state.to_numpy()] +
                          [s.to_numpy() for s in self.enemy_states] +
                          [ZERO_NUMPY] * (MAX_ENEMIES - len(self.enemy_states)) +
                          [s.to_numpy() for s in self.friend_states] +
-                         [ZERO_NUMPY] * (MAX_FRIENDS - len(self.friend_states)))
+                         [ZERO_NUMPY] * (MAX_FRIENDS - len(self.friend_states)) +
+                         [np.array([self.ticks_until_end])])

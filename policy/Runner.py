@@ -58,8 +58,11 @@ class Runner:
                     res_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
                                             '../local-runner/result.txt')
                     print res_path
+                    time.sleep(2.)
+                    delta = time.time() - os.path.getmtime(res_path)
+                    print delta
                     last_reward = None
-                    if time.time() - os.path.getmtime(res_path) < 3.:
+                    if delta < 5.:
                         with open(res_path) as f:
                             lines = f.readlines()
                             result = lines[2].strip().split()
