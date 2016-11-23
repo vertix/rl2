@@ -1,5 +1,6 @@
 import cPickle
 import os
+import random
 import re
 import sys
 import time
@@ -46,25 +47,21 @@ class QFunction(object):
 
     def Q(self, state):
         state = np.matmul(state, self.vars['model/hidden1/weights:0'])
-        # state += self.vars['model/hidden1/biases:0']
         state = BatchNorm(state, self.vars, 'model/hidden1/BatchNorm')
         state = ReLu(state)
 
         state = np.matmul(state, self.vars['model/hidden2/weights:0'])
-        # state += self.vars['model/hidden2/biases:0']
         state = BatchNorm(state, self.vars, 'model/hidden2/BatchNorm')
         state = ReLu(state)
 
         value = np.matmul(state, self.vars['model/val_hid/weights:0'])
         value = BatchNorm(value, self.vars, 'model/val_hid/BatchNorm')
-        # value += self.vars['model/val_hid/biases:0']
         value = ReLu(value)
         value = np.matmul(value, self.vars['model/value/weights:0'])
         value += self.vars['model/value/biases:0']
 
         adv = np.matmul(state, self.vars['model/adv_hid/weights:0'])
         adv = BatchNorm(adv, self.vars, 'model/adv_hid/BatchNorm')
-        # adv += self.vars['model/adv_hid/biases:0']
         adv = ReLu(adv)
         adv = np.matmul(adv, self.vars['model/advantage/weights:0'])
         adv += self.vars['model/advantage/biases:0']
@@ -75,6 +72,38 @@ class QFunction(object):
         value = self.Q(state.to_numpy())
         res = np.argmax(value)
         return res, value[res]
+
+MAX_ATTACK_DISTANCE = 1000
+
+
+class DefaultPolicy(object):
+    def __init__(self, lane):
+        self.lane = lane
+        self.target = 0
+        self.ticks_on_target = 0
+
+    def Act(self, state):
+        enemies = [s for s in state.enemy_states
+                   if s.dist < MAX_ATTACK_DISTANCE]
+
+        if state.my_state.hp < 50:
+            res = 0# FLEE
+            self.ticks_on_target = 100
+        elif enemies:
+            if self.ticks_on_target > 50:
+                self.ticks_on_target = 0
+                self.target = random.choice(
+                    range(min(MAX_TARGETS_NUM, len(enemies))))
+            res = 2 + self.target   # RANGE ATTACK CLOSEST
+            self.ticks_on_target += 1
+        else:
+            self.ticks_on_target = 100
+            res = 1 # ADVANCE
+        # print res
+        return res
+
+    def Stop(self):
+    	pass
 
 
 class RemotePolicy(object):
@@ -116,29 +145,25 @@ class RemotePolicy(object):
         epsilon = 0.5 / (1 + self.steps / 1000.)
         self.steps += 1
 
-        if zmq and (np.random.rand() < epsilon):
-            return np.random.choice(range(self.max_actions))
+        if np.random.rand() < epsilon or self.q is None:
+            return np.random.randint(0, self.max_actions)
 
-        if self.q == None: # or np.random.rand() < 0.5:
-            if state.my_state.hp < 50:
-                # print 'FLEE'
-                return 0  # FLEE
-            elif state.enemy_states:
-                return 2  # RANGE ATTACK CLOSEST
-            else:
-                # print 'ADVANCE'
-                return 1  # ADVANCE
-        else:
-            res, val = self.q.Select(state)
-            action = (['FLEE', 'ADVANCE'] +
-                      ['ATTACK_%d' %i for i in range(1, MAX_TARGETS_NUM + 1)])[res]
-            if action != self.last_action:
-                self.last_action = action
-                print '%s: %.2f' % (action, val)
-            return res
+        res, val = self.q.Select(state)
+        # action = (['FLEE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
+        #           ['ADVANCE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
+        #           ['ATTACK_%d' %i for i in range(1, MAX_TARGETS_NUM + 1)])[res]
+        action = (['FLEE', 'ADVANCE'] +
+                  ['ATTACK_%d' %i for i in range(1, MAX_TARGETS_NUM + 1)])[res]
+        if action != self.last_action:
+            self.last_action = action
+            print '%s: %.2f' % (action, val)
+        return res
 
 
 NUM_ACTIONS = 2 + MAX_TARGETS_NUM
+LANES = [LaneType.TOP, LaneType.MIDDLE, LaneType.BOTTOM]
+GAMMA = 0.995
+Q_N_STEPS = 20
 
 class MyStrategy:
     def __init__(self):
@@ -149,39 +174,60 @@ class MyStrategy:
         else:
             self.sock = None
 
-        if zmq and len(sys.argv) > 2:
+        if len(sys.argv) > 2 and sys.argv[2] and sys.argv[2] != '0' and zmq:
             self.policy = RemotePolicy(sys.argv[2], NUM_ACTIONS)
         else:
-            self.policy = RemotePolicy(None, NUM_ACTIONS)
+            self.policy = DefaultPolicy(random.choice(LANES))
 
         self.last_score = 0.
         self.initialized = False
         self.last_state = {}
         self.last_action = -1
         self.last_tick = None
+        self.num_deaths = 0
 
-        self.exp = {'s':[], 'a': [], 'r': [], 's1': []}
+        self.exps = []
         self.next_file_index = 0
         self.flee_action = None
         self.advance_action = None
-        self.lane = None
 
     def stop(self):
+        self.SaveExperience(self.last_state, self.last_action, 0, None)
+        if self.sock:
+            self.sock.send_pyobj({
+                'type':'stat',
+                'data': {
+                    'Stats/Score': self.last_score,
+                    'Stats/Length': self.last_tick,
+                    'Stats/Num Deaths': self.num_deaths
+                }})
+            print 'Saving stats'
         self.policy.Stop()
 
     def SaveExperience(self, s, a, r, s1):
-        if not self.sock:
+        if not self.sock or not s:
             return
 
-        data = {
+        s1 = s1.to_numpy() if s1 else None
+
+        self.exps.append({
             's': s.to_numpy(),
             'a': a,
             'r': r,
-            's1': s1.to_numpy()
-        }
-        self.sock.send_pyobj(data)
-        if self.sock.recv() != "Ok":
-            print "Error when sending experience"
+            's1': s1
+        })
+
+        if s1 is None or len(self.exps) >= Q_N_STEPS:
+            rew = 0.
+            for exp in reversed(self.exps):
+                rew += GAMMA * exp['r']
+                exp['s1'] = s1
+                exp['r'] = rew
+
+                self.sock.send_pyobj({'type': 'exp', 'data': exp})
+                if self.sock.recv() != "Ok":
+                    print "Error when sending experience"
+            self.exps = []
 
     def move(self, me, world, game, move):
         """
@@ -194,23 +240,24 @@ class MyStrategy:
             if zmq and (len(sys.argv) > 3):
                 self.lane = int(sys.argv[3])
             else:
-                self.lane = LaneType.TOP
+                self.lane = np.random.choice(LANES)
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 
-        lane = self.lane
-
         state = State.WorldState(me, world, game)
+        noop = Actions.NoOpAction()
 
-        targets = [enemy.unit for enemy in state.enemy_states][:MAX_TARGETS_NUM]
+        targets = [enemy.unit for enemy in state.enemy_states
+                   if enemy.dist < 1000][:MAX_TARGETS_NUM]
         actions = ([self.flee_action, self.advance_action] +
-                   [Actions.RangedAttack(game.map_size, lane, t) for t in targets] +
-                   [self.advance_action] * (MAX_TARGETS_NUM - len(targets)))
+                   [Actions.RangedAttack(game.map_size, self.lane, t) for t in targets] +
+                   [noop] * (MAX_TARGETS_NUM - len(targets)))
 
         a = self.policy.Act(state)
         reward = world.get_my_player().score - self.last_score
         if self.last_tick and world.tick_index - self.last_tick > 1:
             reward = -500
+            self.num_deaths += 1
 
         if reward != 0:
             print 'REWARD: %.1f' % reward

@@ -103,7 +103,6 @@ class Path(object):
     def GetNextAngleDistanceAndTarget(self, u):
         current = self.GetCurrentTransition(u)
         if current is None:
-            # import pdb; pdb.set_trace()
             return None
         return current.GetAngleAndDistanceFrom(u) + (current.GetTargetId(),)
         
