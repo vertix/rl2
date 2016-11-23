@@ -97,12 +97,14 @@ class MoveAction(object):
     def RushToTarget(self, me, target, move, game, world):
         path = Cache.GetInstance().GetPathToTarget(me, target, game, world)
         t_id = -1
-        angle = 0
+        angle = None
         d = 10
         if path is None:
             angle = me.get_angle_to_unit(target)
         else:
-            angle, d, t_id = path.GetNextAngleDistanceAndTarget(me)
+            out_tuple = path.GetNextAngleDistanceAndTarget(me)
+            if out_tuple is not None:
+                angle, d, t_id = out_tuple 
         if angle is None:
             angle = me.get_angle_to_unit(target)
         MoveTowardsAngle(me, game, angle, move, d)
