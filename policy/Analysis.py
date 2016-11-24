@@ -17,28 +17,33 @@ BASE = 100
 CAST_RANGE_ERROR = 5
 EPSILON = 1e-4
 INFINITY = 1e6
-AGGRO_TICKS = 400
+AGGRO_TICKS = 50
 
 def BuildCoeff(coeff):
     return max(0.5, coeff)
 
-def GetAggroFromDamage(damage, remaining_cooldown, cooldown):
-    return max(0, (AGGRO_TICKS - remaining_cooldown + cooldown - 1) / cooldown * damage)
+def GetAggroFromDamage(damage, remaining_cooldown, cooldown, deepness):
+    return max(0, (AGGRO_TICKS + deepness - remaining_cooldown + cooldown - 1) /
+                  cooldown * damage)
 
-def GetUnitAggro(me, u, game):
+def GetUnitAggro(me, u, game, deep_in_range):
     aggro = 0
+    speed = GetMaxStrafeSpeed(me, game)
     if isinstance(u, Wizard):
         aggro = GetAggroFromDamage(GetWizardDamage(u, game),
                          max(u.remaining_action_cooldown_ticks,
                              u.remaining_cooldown_ticks_by_action[ActionType.MAGIC_MISSILE]),
-                         game.magic_missile_cooldown_ticks)
+                         game.magic_missile_cooldown_ticks, 
+                         deep_in_range / (speed - GetMaxStrafeSpeed(u, game) / 2.0))
         if me.get_distance_to_unit(u) < game.staff_range:
             aggro += GetAggroFromDamage(GetWizardDamage(u, game),
                          max(u.remaining_action_cooldown_ticks,
                              u.remaining_cooldown_ticks_by_action[ActionType.STAFF]),
                          game.staff_cooldown_ticks)
     if isinstance(u, Building) or isinstance(u, Minion):
-        aggro = GetAggroFromDamage(u.damage, u.remaining_action_cooldown_ticks, u.cooldown_ticks)
+        aggro = GetAggroFromDamage(u.damage, u.remaining_action_cooldown_ticks, 
+                                   u.cooldown_ticks,
+                                   deep_in_range / speed)
     return aggro
 
 def Closest(x, units):
@@ -58,22 +63,31 @@ def ClosestUnit(x, units):
             a = u 
     return a
     
+def GetClosestTarget(me, world, game, radius=INFINITY):
+    return ClosestUnit(me, BuildEnemies(me, world, game, min(radius, me.vision_range*2)))
+    
+def BuildEnemies(me, world, game, radius):
+    return [e for e in world.wizards + world.minions + world.buildings if
+                   IsEnemy(me, e) 
+                   and (e.get_distance_to_unit(me) < radius)]
+
 def PickReachableTarget(me, world, game, radius=INFINITY):
-    enemies = [e for e in world.wizards + world.minions + world.buildings if
-               (e.faction != me.faction) and (e.faction != Faction.NEUTRAL) and 
-               (e.faction != Faction.OTHER) and (
-                e.get_distance_to_unit(me) < me.cast_range + e.radius - CAST_RANGE_ERROR)
-               and (e.get_distance_to_unit(me) < radius)] 
+    enemies = [e for e in BuildEnemies(me, world, game, radius) if 
+               e.get_distance_to_unit(me) < me.cast_range + e.radius - CAST_RANGE_ERROR]
     min_hp = INFINITY
+    best_type = 0
     best = None
     for e in enemies:
+        t = 0
         if isinstance(e, Wizard):
-            return e
+            t = 2
         if isinstance(e, Building):
-            return e
-        if (e.life < min_hp) or ((e.life == min_hp) and (e.id < best.id)):
+            t = 1
+        if (t >= best_type) and ((t > best_type) or (e.life < min_hp) or 
+                                 ((e.life == min_hp) and (e.id < best.id))):
             min_hp = e.life
             best = e
+            best_type = t
     return best
     
 def IsEnemy(me, e):
@@ -83,11 +97,7 @@ def IsEnemy(me, e):
 def PickTarget(me, world, game, radius=INFINITY):
     best = PickReachableTarget(me, world, game, radius)
     if best is None:
-        enemies = [e for e in world.wizards + world.minions + world.buildings if
-                   IsEnemy(me, e) and 
-                   (e.get_distance_to_unit(me) < min(radius, me.vision_range))]
-
-        return ClosestUnit(me, enemies)
+        return GetClosestTarget(me, world, game, radius)
     return best
     
 def PickMeleeTarget(me, world, game):
@@ -107,34 +117,35 @@ def GetMinionAggro(me, allies, m, game, world, safe_distance):
     if d > m.vision_range + EPSILON:
         return 0
     if m.type == MinionType.ORC_WOODCUTTER:
-        coeff =  d / (Closest(m, allies) + safe_distance)
-        if coeff < 1:
-            return GetUnitAggro(me, m, game) * BuildCoeff(coeff)
-    if d - me.radius < game.fetish_blowdart_attack_range + safe_distance:
-        coeff =  d / (Closest(m, allies) + safe_distance)
-        if coeff < 1:
-            return GetUnitAggro(me, m, game) * BuildCoeff(coeff)
+        deepness = min(Closest(m, allies),
+                       game.orc_woodcutter_attack_range) + safe_distance - d
+        if deepness > 0:
+            return GetUnitAggro(me, m, game, deepness)
+    deepness = min(Closest(m, allies),
+                   game.fetish_blowdart_attack_range + me.radius) + safe_distance - d
+    if deepness > 0:
+        return GetUnitAggro(me, m, game, deepness)
     return 0
 
 def GetAggro(me, game, world, safe_distance):
     allies = [a for a in world.wizards + world.minions + world.buildings if
               (a.id != me.id) and (a.faction == me.faction) and 
-              (a.get_distance_to_unit(me) < me.vision_range)]
+              (a.get_distance_to_unit(me) < me.vision_range * 2)]
     aggro = 0
     
     #TODO(vyakunin): add aggro from respawn
     for w in world.wizards:
         d = w.get_distance_to_unit(me)
-        coeff = (d - me.radius) / (w.cast_range + safe_distance)
-        if (w.faction != me.faction) and (coeff < 1):
-            aggro += GetUnitAggro(me, w, game) * BuildCoeff(coeff)
+        deepness = w.cast_range + safe_distance - d + me.radius
+        if (w.faction != me.faction) and (deepness > 0):
+            aggro += GetUnitAggro(me, w, game, deepness)
     for m in world.minions:
         aggro += GetMinionAggro(me, allies, m, game, world, safe_distance)
     for b in world.buildings:
         d = b.get_distance_to_unit(me)
-        coeff = d / (b.attack_range + safe_distance)
-        if (b.faction != me.faction) and (coeff < 1):
-            aggro += GetUnitAggro(me, b, game) * BuildCoeff(coeff)
+        deepness = b.attack_range + safe_distance - d
+        if (b.faction != me.faction) and (deepness > 0):
+            aggro += GetUnitAggro(me, b, game, deepness)
     if StatusType.SHIELDED in [s.type for s in me.statuses]:
         aggro *= (1.0-game.shielded_direct_damage_absorption_factor) 
     return aggro

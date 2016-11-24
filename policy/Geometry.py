@@ -476,7 +476,7 @@ def BuildPath(me, target, game, world):
     else:
         t = LivingUnit(0, target.x, target.y, 0, 0, 0, 0, 0, 0, 0, [])
     obstacles = [o for o in obstacles if o.get_distance_to_unit(target) > 
-                                         o.radius + me.radius + TARGET_EXTRA_SPACE]
+                                         o.radius - t.radius]
     p, prev, d, points_per_unit = FindOptimalPaths(
         me, [Obstacle(me, t)] + obstacles, world)
     t_id = -1

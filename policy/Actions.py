@@ -18,6 +18,7 @@ from Analysis import GetMaxForwardSpeed
 from Analysis import GetMaxStrafeSpeed
 from Analysis import FindUnitById
 from Analysis import PickMeleeTarget
+from Analysis import GetClosestTarget
 from copy import deepcopy
 
 import math
@@ -241,14 +242,18 @@ class RangedAttack(MoveAction):
         return move
 
 class MeleeAttack(MoveAction):
-    def __init__(self, map_size, lane, target):
+    def __init__(self, map_size, lane, target, opt_range_allowance = 40):
         MoveAction.__init__(self, map_size, lane)
         self.target = target
+        self.opt_range_allowance =  opt_range_allowance
 
     def Act(self, me, world, game):
         move = Move()
-        d = me.get_distance_to_unit(self.target)
-        if d > game.staff_range:
+        closest_target = GetClosestTarget(me, world, game)
+        d = me.get_distance_to_unit(closest_target)
+        if not TargetInRangeWithAllowance(me, self.target, self.opt_range_allowance):
             self.RushToTarget(me, self.target, move, game, world)
+        elif d > game.staff_range:
+            self.RushToTarget(me, closest_target, move, game, world)
         self.MakeMissileMove(me, world, game, move, self.target)
         return move

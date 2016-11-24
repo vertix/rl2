@@ -9,7 +9,7 @@ from model.Move import Move
 
 class Runner:
     def __init__(self):
-        if False and sys.argv.__len__() == 4:
+        if sys.argv.__len__() == 4:
             self.remote_process_client = RemoteProcessClient(sys.argv[1], int(sys.argv[2]))
             self.token = sys.argv[3]
         elif len(sys.argv) > 4:

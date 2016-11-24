@@ -87,7 +87,7 @@ class DefaultPolicy(object):
         enemies = [s for s in state.enemy_states
                    if s.dist < MAX_ATTACK_DISTANCE]
 
-        if state.my_state.hp < state.my_state.aggro:
+        if state.my_state.hp - 20 < state.my_state.aggro:
             res = 0 # FLEE
         elif enemies:
             u = PickTarget(state.my_state.me, state.world, state.game,
