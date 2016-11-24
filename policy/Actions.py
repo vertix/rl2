@@ -17,6 +17,7 @@ from Analysis import HaveEnoughTimeToTurn
 from Analysis import GetMaxForwardSpeed
 from Analysis import GetMaxStrafeSpeed
 from Analysis import FindUnitById
+from Analysis import PickMeleeTarget
 from copy import deepcopy
 
 import math
@@ -93,6 +94,7 @@ class MoveAction(object):
             self.waypoints_by_lane[key] = [start] + self.waypoints_by_lane[key] + [end]
         self.focus_target = None
         self.last_target = 0
+        self.overridden_target = None
 
     def RushToTarget(self, me, target, move, game, world):
         path = Cache.GetInstance().GetPathToTarget(me, target, game, world)
@@ -152,7 +154,8 @@ class MoveAction(object):
             return
         distance = me.get_distance_to_unit(t)
         angle_to_target = me.get_angle_to_unit(t)
-        if not HaveEnoughTimeToTurn(me, angle_to_target, t, game):
+        have_time_to_turn_for_missile = HaveEnoughTimeToTurn(me, angle_to_target, t, game)
+        if not have_time_to_turn_for_missile:
              move.turn = angle_to_target
         if GetRemainingActionCooldown(me) == 0:
             move.action = ActionType.MAGIC_MISSILE
@@ -169,8 +172,17 @@ class MoveAction(object):
         
         if move.action == ActionType.MAGIC_MISSILE:
             return
-        if HasMeleeTarget(me, world, game):
+        if (HasMeleeTarget(me, world, game) and 
+            (GetRemainingActionCooldown(me, ActionType.STAFF) == 0)):
             move.action = ActionType.STAFF
+            return
+        if have_time_to_turn_for_missile:
+            melee_target = PickMeleeTarget(me, world, game)
+            if melee_target is not None:
+                angle_to_target = me.get_angle_to_unit(melee_target)
+                if not HaveEnoughTimeToTurn(
+                    me, angle_to_target, melee_target, game, ActionType.STAFF):
+                    move.turn = angle_to_target
 
 
 class FleeAction(MoveAction):
@@ -225,5 +237,18 @@ class RangedAttack(MoveAction):
             self.RushToTarget(me, self.target, move, game, world)
         else:
             self.MakeFleeMove(me, world, game, move)
+        self.MakeMissileMove(me, world, game, move, self.target)
+        return move
+
+class MeleeAttack(MoveAction):
+    def __init__(self, map_size, lane, target):
+        MoveAction.__init__(self, map_size, lane)
+        self.target = target
+
+    def Act(self, me, world, game):
+        move = Move()
+        d = me.get_distance_to_unit(self.target)
+        if d > game.staff_range:
+            self.RushToTarget(me, self.target, move, game, world)
         self.MakeMissileMove(me, world, game, move, self.target)
         return move

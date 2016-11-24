@@ -17,8 +17,11 @@ from model.Move import Move
 from model.Wizard import Wizard
 from model.World import World
 
+from Analysis import PickTarget
+
 import Actions
 import State
+
 
 try:
     import zmq
@@ -79,27 +82,25 @@ MAX_ATTACK_DISTANCE = 1000
 class DefaultPolicy(object):
     def __init__(self, lane):
         self.lane = lane
-        self.target = 0
-        self.ticks_on_target = 0
 
     def Act(self, state):
         enemies = [s for s in state.enemy_states
                    if s.dist < MAX_ATTACK_DISTANCE]
 
-        if state.my_state.hp < 50:
-            res = 0# FLEE
-            self.ticks_on_target = 100
+        if state.my_state.hp < state.my_state.aggro:
+            res = 0 # FLEE
         elif enemies:
-            if self.ticks_on_target > 50:
-                self.ticks_on_target = 0
-                self.target = random.choice(
-                    range(min(MAX_TARGETS_NUM, len(enemies))))
-            res = 2 + self.target   # RANGE ATTACK CLOSEST
-            self.ticks_on_target += 1
+            u = PickTarget(state.my_state.me, state.world, state.game,
+                           radius=MAX_ATTACK_DISTANCE)
+            if u:
+                e_ids = [e.unit.id for e in enemies[:MAX_TARGETS_NUM]]
+                idx = e_ids.index(u.id) if u.id in e_ids else 0
+            else:
+                idx = 0
+            res = 2 + idx   # ATTACK 
         else:
-            self.ticks_on_target = 100
             res = 1 # ADVANCE
-        # print res
+        print res
         return res
 
     def Stop(self):
@@ -257,7 +258,7 @@ class MyStrategy:
         targets = [enemy.unit for enemy in state.enemy_states
                    if enemy.dist < 1000][:MAX_TARGETS_NUM]
         actions = ([self.flee_action, self.advance_action] +
-                   [Actions.RangedAttack(game.map_size, self.lane, t) for t in targets] +
+                   [Actions.MeleeAttack(game.map_size, self.lane, t) for t in targets] +
                    [noop] * (MAX_TARGETS_NUM - len(targets)))
 
         a = self.policy.Act(state)
