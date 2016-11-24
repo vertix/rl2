@@ -52,17 +52,21 @@ class ExperienceBuffer(object):
 
 
 class WeightedExperienceBuffer(object):
-    def __init__(self, buffer_size=1 << 16, gamma=0.995):
+    def __init__(self, alpha, beta, max_weight, buffer_size=1 << 16):
         self.ss, self.aa, self.rr, self.ss1, self.gg = None, None, None, None, None
         self.buffer_size = buffer_size
         self.inserted = 0
         self.tree_size = buffer_size << 1
         # root is 1
-        self.weight_sums = [0.0] * self.tree_size
-        self.gamma = gamma
+        self.weight_sums = np.zeros(self.tree_size)
+        self.weight_min = np.ones(self.tree_size) * (max_weight ** alpha)
+        self.max_weight = max_weight
+        self.alpha = alpha
+        self.beta = beta
 
     def update_up(self, index):
         self.weight_sums[index] = self.weight_sums[index << 1] + self.weight_sums[(index << 1) + 1]
+        self.weight_min[index] = min(self.weight_min[index << 1], self.weight_min[(index << 1) + 1])
         if index > 1:
             self.update_up(index >> 1)
 
@@ -74,10 +78,13 @@ class WeightedExperienceBuffer(object):
 
     def tree_update(self, buffer_index, new_weight):
         index = self.index_in_tree(buffer_index)
+        new_weight = min(new_weight + 0.01, self.max_weight) ** self.alpha
+
         self.weight_sums[index] = new_weight
+        self.weight_min[index] = new_weight
         self.update_up(index >> 1)
 
-    def add(self, s, a, r, s1, weight):
+    def add(self, s, a, r, s1, gamma, weight):
         if self.ss is None:
             # Initialize
             state_size = len(s)
@@ -93,7 +100,7 @@ class WeightedExperienceBuffer(object):
         self.rr[cur_index] = r
         if s1 is not None:
             self.ss1[:, cur_index] = s1
-            self.gg[cur_index] = self.gamma
+            self.gg[cur_index] = gamma
         else:
             self.ss1[:, cur_index] = s
             self.gg[cur_index] = 0.
@@ -105,31 +112,34 @@ class WeightedExperienceBuffer(object):
     @property
     def state_size(self):
         return None if self.ss is None else self.ss.shape[0]
-    
+
     def find_sum(self, node, sum):
         if node >= self.buffer_size:
             return self.index_in_buffer(node)
         left = node << 1
         left_sum = self.weight_sums[left]
-        if sum < left_sum :
+        if sum < left_sum:
             return self.find_sum(left, sum)
         else:
             return self.find_sum(left + 1, sum - left_sum)
-    
+
     def sample_indexes(self, size):
         total_weight = self.weight_sums[1]
-        indexes = []
+        indexes = np.zeros(size, dtype=np.int32)
         for i in xrange(size):
             search = np.random.random() * total_weight
-            indexes.append(self.find_sum(1, search))
+            indexes[i] = self.find_sum(1, search)
         return indexes
 
     def sample(self, size):
         if size > self.inserted:
-            return None, None, None, None, None, None
+            return None, None, None, None, None, None, None
 
         indexes = self.sample_indexes(size)
+        max_w = (self.weight_min[1] / self.weight_sums[1]) ** -self.beta
+        w = (self.weight_sums[self.index_in_tree(indexes)] / self.weight_sums[1]) ** -self.beta
 
         return (indexes, 
                 np.transpose(self.ss[:,indexes]), self.aa[indexes], self.rr[indexes],
-                np.transpose(self.ss1[:, indexes]), self.gg[indexes])
+                np.transpose(self.ss1[:, indexes]), self.gg[indexes],
+                w / max_w)

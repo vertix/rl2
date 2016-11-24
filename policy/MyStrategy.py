@@ -97,7 +97,7 @@ class DefaultPolicy(object):
                 idx = e_ids.index(u.id) if u.id in e_ids else 0
             else:
                 idx = 0
-            res = 2 + idx   # ATTACK 
+            res = 2 + idx   # ATTACK
         else:
             res = 1 # ADVANCE
         print res
@@ -125,7 +125,7 @@ class RemotePolicy(object):
         self.steps = 0
         self.max_actions = max_actions
         self.last_action = None
-        self.actions_debug = (['FLEE', 'ADVANCE'] + 
+        self.actions_debug = (['FLEE', 'ADVANCE'] +
                               ['ATTACK_%d' %i for i in range(1, MAX_TARGETS_NUM + 1)])
 
     def Stop(self):
@@ -200,7 +200,7 @@ class MyStrategy:
             print 'Final score is %d' % final_score
             print 'Final reward is %d' % r
 
-        self.SaveExperience(self.last_state, self.last_action, r, None)
+        self.SaveExperience(self.last_state, self.last_action, r, None, 0.)
         if self.sock:
             self.sock.send_pyobj({
                 'type':'stat',
@@ -212,7 +212,7 @@ class MyStrategy:
             print 'Saving stats'
         self.policy.Stop()
 
-    def SaveExperience(self, s, a, r, s1):
+    def SaveExperience(self, s, a, r, s1, gamma):
         if not self.sock or not s:
             return
 
@@ -222,15 +222,19 @@ class MyStrategy:
             's': s.to_numpy(),
             'a': a,
             'r': r,
-            's1': s1
+            's1': s1,
+            'g': gamma
         })
 
         if s1 is None or len(self.exps) >= Q_N_STEPS:
             rew = 0.
+            g = 1.
             for exp in reversed(self.exps):
-                rew += GAMMA * exp['r']
+                rew += exp['r'] + exp['g'] * rew
+                g *= exp['g']
                 exp['s1'] = s1
                 exp['r'] = rew
+                exp['g'] = g
 
                 self.sock.send_pyobj({'type': 'exp', 'data': exp})
                 if self.sock.recv() != "Ok":
@@ -263,15 +267,16 @@ class MyStrategy:
 
         a = self.policy.Act(state)
         reward = world.get_my_player().score - self.last_score
+        gamma = GAMMA
         if self.last_tick and world.tick_index - self.last_tick > 1:
-            # reward = -500
+            gamma = GAMMA ** (world.tick_index - self.last_tick)
             self.num_deaths += 1
 
         if reward != 0:
             print 'REWARD: %.1f' % reward
 
         if self.initialized:
-            self.SaveExperience(self.last_state, self.last_action, reward, state)
+            self.SaveExperience(self.last_state, self.last_action, reward, state, gamma)
 
         my_move = actions[a].Act(me, world, game)
         for attr in ['speed', 'strafe_speed', 'turn', 'action', 'cast_angle', 'min_cast_distance',
