@@ -17,7 +17,7 @@ BASE = 100
 CAST_RANGE_ERROR = 5
 EPSILON = 1e-4
 INFINITY = 1e6
-AGGRO_TICKS = 50
+AGGRO_TICKS = 60
 
 def BuildCoeff(coeff):
     return max(0.5, coeff)
@@ -185,3 +185,52 @@ def FindUnitById(world, t_id):
         if t_id == o.id:
             return o
     return None
+
+def AddInvisibleBuildings(me, world, game):
+    buildings = [
+        Building(id=-20, x=3950.0, y=1306.7422221916627, speed_x=0, speed_y=0,
+                 angle=0, faction=1-me.faction, radius=50.0, life=500, max_life=500,
+                 statuses=[], type=0, vision_range=600.0, attack_range=600.0,
+                 damage=36, cooldown_ticks=240, remaining_action_cooldown_ticks=240),
+        Building(id=-21, x=3650.0, y=2343.2513553373133, speed_x=0, speed_y=0,
+                 angle=0, faction=1-me.faction, radius=50.0, life=500, max_life=500,
+                 statuses=[], type=0, vision_range=600.0, attack_range=600.0,
+                 damage=36, cooldown_ticks=240, remaining_action_cooldown_ticks=240),
+        Building(id=-22, x=3097.386941332822, y=1231.9023805485235, speed_x=0, speed_y=0,
+                 angle=0, faction=1-me.faction, radius=50.0, life=500, max_life=500,
+                 statuses=[], type=0, vision_range=600.0, attack_range=600.0,
+                 damage=36, cooldown_ticks=240, remaining_action_cooldown_ticks=240),                                  
+        Building(id=-23, x=2070.710678118655, y=1600.0, speed_x=0, speed_y=0,
+                 angle=0, faction=1-me.faction, radius=50.0, life=500, max_life=500,
+                 statuses=[], type=0, vision_range=600.0, attack_range=600.0,
+                 damage=36, cooldown_ticks=240, remaining_action_cooldown_ticks=240),
+        Building(id=-24, x=1687.8740025771563, y=50.0, speed_x=0, speed_y=0,
+                 angle=0, faction=1-me.faction, radius=50.0, life=500, max_life=500,
+                 statuses=[], type=0, vision_range=600.0, attack_range=600.0,
+                 damage=36, cooldown_ticks=240, remaining_action_cooldown_ticks=240),
+        Building(id=-25, x=2629.339679648397, y=350.0, speed_x=0, speed_y=0,
+                 angle=0, faction=1-me.faction, radius=50.0, life=500, max_life=500,
+                 statuses=[], type=0, vision_range=600.0, attack_range=600.0,
+                 damage=36, cooldown_ticks=240, remaining_action_cooldown_ticks=240),                                                   
+        Building(id=-26, x=3600.0, y=400.0, speed_x=0, speed_y=0,
+                 angle=0, faction=1-me.faction, radius=100.0, life=1000, max_life=500,
+                 statuses=[], type=1, vision_range=800.0, attack_range=800.0,
+                 damage=48, cooldown_ticks=240, remaining_action_cooldown_ticks=240)
+    ]
+    new_b = []
+    for fake_b in buildings:
+        found = False
+        for a in world.wizards + world.minions + world.buildings:
+            if a.faction == me.faction:
+                if a.get_distance_to_unit(fake_b) < a.vision_range - 10:
+                    found = True
+                    break
+        if found:
+            continue
+        for real_b in world.buildings:
+            if real_b.get_distance_to_unit(fake_b) < 10:
+                found = True
+                break
+        if not found:
+            new_b.append(fake_b)
+    world.buildings.extend(new_b)

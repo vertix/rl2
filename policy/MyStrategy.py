@@ -18,6 +18,7 @@ from model.Wizard import Wizard
 from model.World import World
 
 from Analysis import PickTarget
+from Analysis import AddInvisibleBuildings
 
 import Actions
 import State
@@ -100,7 +101,7 @@ class DefaultPolicy(object):
             res = 2 + idx   # ATTACK
         else:
             res = 1 # ADVANCE
-        print res
+        # print res
         return res
 
     def Stop(self):
@@ -248,6 +249,7 @@ class MyStrategy:
         @type game: Game
         @type move: Move
         """
+        AddInvisibleBuildings(me, world, game)
         if self.flee_action is None:
             if zmq and (len(sys.argv) > 3):
                 self.lane = int(sys.argv[3])
