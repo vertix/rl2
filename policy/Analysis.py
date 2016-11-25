@@ -1,3 +1,6 @@
+from collections import namedtuple
+from copy import deepcopy
+
 from model.Faction import Faction
 from model.MinionType import MinionType
 from model.Building import Building
@@ -71,9 +74,9 @@ def BuildEnemies(me, world, game, radius):
                    IsEnemy(me, e) 
                    and (e.get_distance_to_unit(me) < radius)]
 
-def PickReachableTarget(me, world, game, radius=INFINITY):
+def PickReachableTarget(me, world, game, cast_range, radius=INFINITY):
     enemies = [e for e in BuildEnemies(me, world, game, radius) if 
-               e.get_distance_to_unit(me) < me.cast_range + e.radius - CAST_RANGE_ERROR]
+               e.get_distance_to_unit(me) < cast_range + e.radius - CAST_RANGE_ERROR]
     min_hp = INFINITY
     best_type = 0
     best = None
@@ -91,17 +94,15 @@ def PickReachableTarget(me, world, game, radius=INFINITY):
     return best
     
 def IsEnemy(me, e):
-    return (e.faction != me.faction) and (e.faction != Faction.OTHER) and (
+    return (e.id >= 0) and (e.faction != me.faction) and (e.faction != Faction.OTHER) and (
             (e.faction != Faction.NEUTRAL) or (not NeutralMinionInactive(e)))
 
 def PickTarget(me, world, game, radius=INFINITY):
-    best = PickReachableTarget(me, world, game, radius)
-    if best is None:
-        return GetClosestTarget(me, world, game, radius)
+    best = PickReachableTarget(me, world, game, radius, radius)
     return best
     
 def PickMeleeTarget(me, world, game):
-    return PickTarget(me, world, game, game.staff_range)
+    return PickReachableTarget(me, world, game, game.staff_range)
     
 def NeutralMinionInactive(m):
     return ((abs(m.speed_x) + abs(m.speed_y) < EPSILON) and
@@ -165,19 +166,19 @@ def HaveEnoughTimeToTurn(w, angle, target, game, action=ActionType.MAGIC_MISSILE
 def GetWizardDamage(w, game):
     d = game.staff_damage
     if StatusType.EMPOWERED in [s.type for s in w.statuses]:
-        d *= game.empowered_damage_factor
+        d = d * (1.0 + game.empowered_damage_factor)
     return d
     
 def GetMaxForwardSpeed(w, game):
     s = game.wizard_forward_speed
     if StatusType.HASTENED in [s.type for s in w.statuses]:
-        s *= game.hastened_movement_bonus_factor
+        s = s * (1.0 + game.hastened_movement_bonus_factor)
     return s
     
 def GetMaxStrafeSpeed(w, game):
     s = game.wizard_strafe_speed
     if StatusType.HASTENED in [s.type for s in w.statuses]:
-        s *= game.hastened_movement_bonus_factor
+        s = s * (1.0 + game.hastened_movement_bonus_factor)
     return s
 
 def FindUnitById(world, t_id):
@@ -186,51 +187,62 @@ def FindUnitById(world, t_id):
             return o
     return None
 
-def AddInvisibleBuildings(me, world, game):
-    buildings = [
-        Building(id=-20, x=3950.0, y=1306.7422221916627, speed_x=0, speed_y=0,
-                 angle=0, faction=1-me.faction, radius=50.0, life=500, max_life=500,
-                 statuses=[], type=0, vision_range=600.0, attack_range=600.0,
-                 damage=36, cooldown_ticks=240, remaining_action_cooldown_ticks=240),
-        Building(id=-21, x=3650.0, y=2343.2513553373133, speed_x=0, speed_y=0,
-                 angle=0, faction=1-me.faction, radius=50.0, life=500, max_life=500,
-                 statuses=[], type=0, vision_range=600.0, attack_range=600.0,
-                 damage=36, cooldown_ticks=240, remaining_action_cooldown_ticks=240),
-        Building(id=-22, x=3097.386941332822, y=1231.9023805485235, speed_x=0, speed_y=0,
-                 angle=0, faction=1-me.faction, radius=50.0, life=500, max_life=500,
-                 statuses=[], type=0, vision_range=600.0, attack_range=600.0,
-                 damage=36, cooldown_ticks=240, remaining_action_cooldown_ticks=240),                                  
-        Building(id=-23, x=2070.710678118655, y=1600.0, speed_x=0, speed_y=0,
-                 angle=0, faction=1-me.faction, radius=50.0, life=500, max_life=500,
-                 statuses=[], type=0, vision_range=600.0, attack_range=600.0,
-                 damage=36, cooldown_ticks=240, remaining_action_cooldown_ticks=240),
-        Building(id=-24, x=1687.8740025771563, y=50.0, speed_x=0, speed_y=0,
-                 angle=0, faction=1-me.faction, radius=50.0, life=500, max_life=500,
-                 statuses=[], type=0, vision_range=600.0, attack_range=600.0,
-                 damage=36, cooldown_ticks=240, remaining_action_cooldown_ticks=240),
-        Building(id=-25, x=2629.339679648397, y=350.0, speed_x=0, speed_y=0,
-                 angle=0, faction=1-me.faction, radius=50.0, life=500, max_life=500,
-                 statuses=[], type=0, vision_range=600.0, attack_range=600.0,
-                 damage=36, cooldown_ticks=240, remaining_action_cooldown_ticks=240),                                                   
-        Building(id=-26, x=3600.0, y=400.0, speed_x=0, speed_y=0,
-                 angle=0, faction=1-me.faction, radius=100.0, life=1000, max_life=500,
-                 statuses=[], type=1, vision_range=800.0, attack_range=800.0,
-                 damage=48, cooldown_ticks=240, remaining_action_cooldown_ticks=240)
-    ]
-    new_b = []
-    for fake_b in buildings:
-        found = False
-        for a in world.wizards + world.minions + world.buildings:
-            if a.faction == me.faction:
-                if a.get_distance_to_unit(fake_b) < a.vision_range - 10:
-                    found = True
-                    break
-        if found:
-            continue
-        for real_b in world.buildings:
-            if real_b.get_distance_to_unit(fake_b) < 10:
-                found = True
-                break
-        if not found:
-            new_b.append(fake_b)
-    world.buildings.extend(new_b)
+class HistoricStateTracker(object):
+    instance = None
+    def __init__(self, me, world):
+        self.buildings = []
+        for b in world.buildings:
+            nb = deepcopy(b)
+            nb.faction = 1 - me.faction
+            nb.remaining_action_cooldown_ticks = 0
+            nb.id = -b.id - 1
+            nb.x = world.width - b.x
+            nb.y = world.height - b.y
+            self.buildings.append(nb)
+        self.last_fired = [0] * len(self.buildings)
+        
+
+    @classmethod
+    def GetInstance(cls, me, world):
+        if HistoricStateTracker.instance is None:
+            HistoricStateTracker.instance = HistoricStateTracker(me, world)
+        return HistoricStateTracker.instance
+        
+    def AddInvisibleBuildings(self, me, world, game):
+        new_b = []
+        dead_b = []
+        bad_ids = []
+        for i, b in enumerate(world.buildings):
+            if b.id < 0:
+                bad_ids.append(i)
+        for i in reversed(bad_ids):
+            world.buildings = world.buildings[:i] + world.buildings[i+1:]
+        for i, fake_b in enumerate(self.buildings):
+            found = False
+            for real_b in world.buildings:
+                if (real_b.id >= 0) and (real_b.faction != me.faction):
+                    if ((real_b.get_distance_to_unit(fake_b) < 500) and
+                        (real_b.type == fake_b.type)):
+                            found = True
+                            fake_b.life = real_b.life
+                            fake_b.remaining_action_cooldown_ticks = real_b.remaining_action_cooldown_ticks
+                            fake_b.x = real_b.x
+                            fake_b.y = real_b.y
+                            self.last_fired[i] = world.tick_index - real_b.cooldown_ticks + real_b.remaining_action_cooldown_ticks
+                            break
+            if found:
+                continue
+            fake_b.remaining_action_cooldown_ticks = max(
+                0, self.last_fired[i] + fake_b.cooldown_ticks - world.tick_index)
+            for a in world.wizards + world.minions + world.buildings:
+                if a.faction == me.faction:
+                    if a.get_distance_to_unit(fake_b) < a.vision_range:
+                        found = True
+                        dead_b.append(i)
+                        break
+            if not found:
+                new_b.append(fake_b)
+        world.buildings.extend(new_b)
+        for i in reversed(dead_b):
+            self.buildings = self.buildings[:i] + self.buildings[i+1:]
+            self.last_fired = self.last_fired[:i] + self.last_fired[i+1:]
