@@ -88,7 +88,7 @@ class DefaultPolicy(object):
         enemies = [s for s in state.enemy_states
                    if s.dist < MAX_ATTACK_DISTANCE]
 
-        if state.my_state.hp - 25 < state.my_state.aggro:
+        if state.my_state.hp - 35 < state.my_state.aggro:
             res = 0 # FLEE
         elif enemies:
             u = PickTarget(state.my_state.me, state.world, state.game,
@@ -256,7 +256,7 @@ class MyStrategy:
         @type move: Move
         """
         HistoricStateTracker.GetInstance(me, world).AddInvisibleBuildings(me, world, game)
-
+        # print world.tick_index
         if world.tick_index < 10:
             l = GetLane(me.messages)
             if l is not None:
@@ -288,8 +288,8 @@ class MyStrategy:
             gamma = GAMMA ** (world.tick_index - self.last_tick)
             self.num_deaths += 1
 
-        if reward != 0:
-            print 'REWARD: %.1f' % reward
+        # if reward != 0:
+        #     print 'REWARD: %.1f' % reward
 
         if self.initialized:
             self.SaveExperience(self.last_state, self.last_action, reward, state, gamma)
@@ -304,3 +304,4 @@ class MyStrategy:
         self.last_action = a
         self.initialized = True
         self.last_tick = world.tick_index
+        # print world.tick_index

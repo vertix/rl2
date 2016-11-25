@@ -20,7 +20,7 @@ BASE = 100
 CAST_RANGE_ERROR = 5
 EPSILON = 1e-4
 INFINITY = 1e6
-AGGRO_TICKS = 60
+AGGRO_TICKS = 10
 
 def BuildCoeff(coeff):
     return max(0.5, coeff)
@@ -94,8 +94,8 @@ def PickReachableTarget(me, world, game, cast_range, radius=INFINITY):
     return best
     
 def IsEnemy(me, e):
-    return (e.id >= 0) and (e.faction != me.faction) and (e.faction != Faction.OTHER) and (
-            (e.faction != Faction.NEUTRAL) or (not NeutralMinionInactive(e)))
+    return ((e.faction != me.faction) and (e.faction != Faction.OTHER) and (
+            (e.faction != Faction.NEUTRAL) or (not NeutralMinionInactive(e))))
 
 def PickTarget(me, world, game, radius=INFINITY):
     best = PickReachableTarget(me, world, game, radius, radius)
