@@ -31,7 +31,7 @@ def GetAggroFromDamage(damage, remaining_cooldown, cooldown, deepness):
 
 def GetUnitAggro(me, u, game, deep_in_range):
     aggro = 0
-    speed = GetMaxStrafeSpeed(me, game)
+    speed = GetMaxForwardSpeed(me, game)
     if isinstance(u, Wizard):
         aggro = GetAggroFromDamage(GetWizardDamage(u, game),
                          max(u.remaining_action_cooldown_ticks,

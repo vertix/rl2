@@ -149,13 +149,19 @@ class MoveAction(object):
         self.RushToTarget(me, target, move, game, world)
 
     def MakeMissileMove(self, me, world, game, move, target=None):
-        t = (deepcopy(self.overridden_target) if self.overridden_target is not None 
-             else deepcopy(target))
+        t = None
+        if self.overridden_target is not None:
+            t = deepcopy(self.overridden_target)
+        elif target is not None:
+             t = deepcopy(target)
         if t is None:
             t = PickReachableTarget(me, world, game, me.cast_range)
         if t is None:
             return
         distance = me.get_distance_to_unit(t)
+
+        if GetRemainingActionCooldown(me) == 0:
+            move.action = ActionType.MAGIC_MISSILE
 
         if not TargetInRangeWithAllowance(me, t, game.magic_missile_radius):
             n_t = PickReachableTarget(me, world, game, me.cast_range)
@@ -175,8 +181,6 @@ class MoveAction(object):
         have_time_to_turn_for_missile = HaveEnoughTimeToTurn(me, angle_to_target, t, game)
         if not have_time_to_turn_for_missile:
              move.turn = angle_to_target
-        if GetRemainingActionCooldown(me) == 0:
-            move.action = ActionType.MAGIC_MISSILE
 
        
         if abs(angle_to_target) > abs(math.atan2(t.radius, distance)):
