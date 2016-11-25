@@ -122,7 +122,7 @@ class LivingUnitState(State):
     @property
     def enemy(self):
         """Returns 1. if enemy, else 0."""
-        return 1. if self.unit.faction == 1 - self.me.faction else 0.
+        return 1. if (self.unit.faction == 1 - self.me.faction) and (self.unit.id >= 0) else 0.
 
     @property
     def neutral(self):

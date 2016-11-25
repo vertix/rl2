@@ -5,6 +5,7 @@ from model.Move import Move
 from model.Wizard import Wizard
 from model.World import World
 from model.Unit import Unit
+from model.Message import Message
 from Geometry import Point
 from Geometry import HasMeleeTarget
 from Geometry import TargetInRangeWithAllowance
@@ -31,7 +32,6 @@ MISSILE_DISTANCE_ERROR = 10
 MARGIN = 200
 last_x = -1
 last_y = -1
-
 
 class NoOpAction(object):
     def Act(self, me, world, game):
@@ -96,6 +96,14 @@ class MoveAction(object):
         self.focus_target = None
         self.last_target = 0
         self.overridden_target = None
+        
+    def MaybeSetLanes(self, me, move):
+        if me.master:
+            move.messages = [Message(LaneType.TOP, None, "0"), 
+                             Message(LaneType.TOP, None, "0"),
+                             Message(LaneType.MIDDLE, None, "0"),
+                             Message(LaneType.MIDDLE, None, "0"),
+                             Message(LaneType.BOTTOM, None, "0")]
 
     def RushToTarget(self, me, target, move, game, world):
         path = Cache.GetInstance().GetPathToTarget(me, target, game, world)
@@ -141,35 +149,43 @@ class MoveAction(object):
         self.RushToTarget(me, target, move, game, world)
 
     def MakeMissileMove(self, me, world, game, move, target=None):
-        t = (deepcopy(self.overridden_target) if self.overridden_target is not None 
-             else deepcopy(target))
+        t = None
+        if self.overridden_target is not None:
+            t = deepcopy(self.overridden_target)
+        elif target is not None:
+             t = deepcopy(target)
         if t is None:
-            if (self.focus_target != None and
-                    world.tick_index < self.last_target + TARGET_COOLDOWN):
-                t = self.focus_target
-            else:
-                t = PickTarget(me, world, game)
-                self.focus_target = t
-                self.last_target = world.tick_index
+            t = PickReachableTarget(me, world, game, me.cast_range)
         if t is None:
             return
         distance = me.get_distance_to_unit(t)
+
+        if GetRemainingActionCooldown(me) == 0:
+            move.action = ActionType.MAGIC_MISSILE
+
+        if not TargetInRangeWithAllowance(me, t, game.magic_missile_radius):
+            n_t = PickReachableTarget(me, world, game, me.cast_range)
+            if n_t is not None:
+                t = n_t
+                distance = me.get_distance_to_unit(t)
+                if not TargetInRangeWithAllowance(me, t, game.magic_missile_radius):
+                    move.action = ActionType.NONE
+            else:
+                move.action = ActionType.NONE
+        move.min_cast_distance = min(
+            me.cast_range, 
+            me.get_distance_to_unit(t) - t.radius + game.magic_missile_radius)
+        # print 'final_target %d' % t.id
+        # import pdb; pdb.set_trace()
         angle_to_target = me.get_angle_to_unit(t)
         have_time_to_turn_for_missile = HaveEnoughTimeToTurn(me, angle_to_target, t, game)
         if not have_time_to_turn_for_missile:
              move.turn = angle_to_target
-        if GetRemainingActionCooldown(me) == 0:
-            move.action = ActionType.MAGIC_MISSILE
 
        
         if abs(angle_to_target) > abs(math.atan2(t.radius, distance)):
             move.action = ActionType.NONE
-
-        move.min_cast_distance = min(
-            me.cast_range, 
-            me.get_distance_to_unit(t) - t.radius + game.magic_missile_radius)
-        if not TargetInRangeWithAllowance(me, t, game.magic_missile_radius):
-            move.action = ActionType.NONE
+        
         
         if move.action == ActionType.MAGIC_MISSILE:
             return
@@ -196,10 +212,9 @@ class FleeAction(MoveAction):
         move = Move()
         aggro = GetAggro(me, game, world, self.safe_distance)
         target = None
-        target = PickReachableTarget(me, world, game)
+        target = PickReachableTarget(me, world, game, me.cast_range)
         if aggro > 0:
             # print 'flee with aggro'
-            # import pdb; pdb.set_trace()
             self.MakeFleeMove(me, world, game, move)
         elif ((target is not None) and 
               TargetInRangeWithAllowance(me, target, self.opt_range_allowance)):
@@ -210,6 +225,7 @@ class FleeAction(MoveAction):
             self.MakeAdvanceMove(me, world, game, move)
 
         self.MakeMissileMove(me, world, game, move, target)
+        self.MaybeSetLanes(me, move)
         return move
 
 
@@ -221,6 +237,7 @@ class AdvanceAction(MoveAction):
         move = Move()
         self.MakeAdvanceMove(me, world, game, move)
         self.MakeMissileMove(me, world, game, move)
+        self.MaybeSetLanes(me, move)        
         return move
 
 
@@ -239,6 +256,7 @@ class RangedAttack(MoveAction):
         else:
             self.MakeFleeMove(me, world, game, move)
         self.MakeMissileMove(me, world, game, move, self.target)
+        self.MaybeSetLanes(me, move)        
         return move
 
 class MeleeAttack(MoveAction):
@@ -256,4 +274,5 @@ class MeleeAttack(MoveAction):
         elif d > game.staff_range:
             self.RushToTarget(me, closest_target, move, game, world)
         self.MakeMissileMove(me, world, game, move, self.target)
+        self.MaybeSetLanes(me, move)        
         return move

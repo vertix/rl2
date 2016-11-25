@@ -18,7 +18,7 @@ from model.Wizard import Wizard
 from model.World import World
 
 from Analysis import PickTarget
-from Analysis import AddInvisibleBuildings
+from Analysis import HistoricStateTracker
 
 import Actions
 import State
@@ -88,7 +88,7 @@ class DefaultPolicy(object):
         enemies = [s for s in state.enemy_states
                    if s.dist < MAX_ATTACK_DISTANCE]
 
-        if state.my_state.hp - 20 < state.my_state.aggro:
+        if state.my_state.hp - 25 < state.my_state.aggro:
             res = 0 # FLEE
         elif enemies:
             u = PickTarget(state.my_state.me, state.world, state.game,
@@ -183,6 +183,12 @@ LANES = [LaneType.TOP, LaneType.MIDDLE, LaneType.BOTTOM]
 GAMMA = 0.995
 Q_N_STEPS = 20
 
+def GetLane(messages):
+    for m in reversed(messages):
+        if m.lane is not None:
+            return m.lane
+    return None
+
 class MyStrategy:
     def __init__(self):
         if zmq and len(sys.argv) > 1:
@@ -264,7 +270,15 @@ class MyStrategy:
         @type game: Game
         @type move: Move
         """
-        AddInvisibleBuildings(me, world, game)
+        HistoricStateTracker.GetInstance(me, world).AddInvisibleBuildings(me, world, game)
+
+        if world.tick_index < 10:
+            l = GetLane(me.messages)
+            if l is not None:
+                self.lane = l
+                self.flee_action = Actions.FleeAction(game.map_size, self.lane)
+                self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
+                
         if self.flee_action is None:
             if zmq and (len(sys.argv) > 3):
                 self.lane = int(sys.argv[3])

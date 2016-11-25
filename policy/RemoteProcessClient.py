@@ -364,7 +364,7 @@ class RemoteProcessClient:
         else:
             self.write_boolean(True)
 
-            self.write_enum(message.lane)
+            self.write_enum(message.line)
             self.write_enum(message.skill_to_learn)
             self.write_byte_array(message.raw_message)
 
