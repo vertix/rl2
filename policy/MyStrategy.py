@@ -152,6 +152,21 @@ class RemotePolicy(object):
         if np.random.rand() < epsilon or self.q is None:
             return np.random.randint(0, self.max_actions)
 
+        if False:
+            values = self.q.Q(state.to_numpy())
+            res = np.argmax(values)
+            debug = []
+            for i, (act, v) in enumerate(zip(self.actions_debug, values)):
+                act = act.rjust(8)
+                if i == res:
+                    act = '*' + act
+                else:
+                    act = ' ' + act
+                v = ('%.2f' % v).rjust(7)
+                debug.append('%s:%s' % (act, v))
+            print ' '.join(debug)
+            return res
+
         res, val = self.q.Select(state)
         # action = (['FLEE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
         #           ['ADVANCE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
