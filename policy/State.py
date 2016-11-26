@@ -245,7 +245,7 @@ class MyState(WizardState):
         
     @property
     def aggro(self):
-        return GetAggro(self.me, self.game, self.world, 10) #safe_distance
+        return GetAggro(self.me, self.game, self.world, 15) #safe_distance
 
     def _to_numpy_internal(self):
         return np.array([

@@ -20,18 +20,18 @@ BASE = 100
 CAST_RANGE_ERROR = 5
 EPSILON = 1e-4
 INFINITY = 1e6
-AGGRO_TICKS = 10
+AGGRO_TICKS = 20
 
 def BuildCoeff(coeff):
     return max(0.5, coeff)
 
 def GetAggroFromDamage(damage, remaining_cooldown, cooldown, deepness):
-    return max(0, (AGGRO_TICKS + deepness - remaining_cooldown + cooldown - 1) /
-                  cooldown * damage)
+    return (max(0, int(AGGRO_TICKS + deepness - remaining_cooldown + cooldown - 1)) /
+            int(cooldown) * damage)
 
 def GetUnitAggro(me, u, game, deep_in_range):
     aggro = 0
-    speed = GetMaxForwardSpeed(me, game)
+    speed = GetMaxStrafeSpeed(me, game)
     if isinstance(u, Wizard):
         aggro = GetAggroFromDamage(GetWizardDamage(u, game),
                          max(u.remaining_action_cooldown_ticks,
@@ -221,7 +221,9 @@ class HistoricStateTracker(object):
         for i, fake_b in enumerate(self.buildings):
             found = False
             for real_b in world.buildings:
-                if (real_b.id >= 0) and (real_b.faction != me.faction):
+                if (real_b.faction != me.faction):
+                    # if real_b.type == BuildingType.FACTION_BASE:
+                    #     import pdb; pdb.set_trace()
                     if ((real_b.get_distance_to_unit(fake_b) < 500) and
                         (real_b.type == fake_b.type)):
                             found = True
