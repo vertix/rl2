@@ -15,6 +15,8 @@ from model.World import World
 from Analysis import GetAggro
 from Analysis import IsEnemy
 
+from Geometry import GetLanes
+
 # Ideas for features
 # Exp for hit
 # Exp for kill
@@ -129,6 +131,18 @@ class LivingUnitState(State):
     def neutral(self):
         """1. if neutral unit, else 0."""
         return 1. if self.unit.faction > Faction.RENEGADES else 0.
+    
+    @property
+    def is_on_top_lane(self):
+        return 1. if LaneType.TOP in GetLanes(self.unit) else 0.
+
+    @property
+    def is_on_middle_lane(self):
+        return 1. if LaneType.MIDDLE in GetLanes(self.unit) else 0.
+
+    @property
+    def is_on_bottom_lane(self):
+        return 1. if LaneType.BOTTOM in GetLanes(self.unit) else 0.
 
     def _to_numpy_internal(self):
         return np.array([
@@ -136,7 +150,8 @@ class LivingUnitState(State):
             self.position[0], self.position[1], self.radius, self.speed[0], self.speed[1],
             self.max_speed, self.angle, self.rel_position[0], self.rel_position[1],
             self.rel_speed[0], self.rel_speed[1], self.rel_angle,
-            self.dist, self.attack_range, self.vision_range, self.cooldown_ticks
+            self.dist, self.attack_range, self.vision_range, self.cooldown_ticks,
+            self.is_on_top_lane, self.is_on_middle_lane, self.is_on_bottom_lane,
         ])
 
 
@@ -240,19 +255,25 @@ class MinionState(LivingUnitState):
 
 
 class MyState(WizardState):
-    def __init__(self, me, game, world):
+    def __init__(self, me, game, world, lane):
         super(MyState, self).__init__(me, me, game, world)
+        self.lane = lane
         
     @property
     def aggro(self):
         return GetAggro(self.me, self.game, self.world, 15) #safe_distance
+
+    @property
+    def current_lane(self):
+        return self.lane
 
     def _to_numpy_internal(self):
         return np.array([
             self.hp, self.max_hp, self.mana, self.max_mana,
             self.position[0], self.position[1], self.radius, self.speed[0], self.speed[1],
             self.max_speed, self.angle,
-            self.attack_range, self.vision_range, self.cooldown_ticks, self.aggro
+            self.attack_range, self.vision_range, self.cooldown_ticks, self.aggro,
+            self.current_lane,
         ])
 
 
@@ -262,9 +283,9 @@ MAX_FRIENDS = 10
 
 
 class WorldState(State):
-    def __init__(self, me, world, game):
+    def __init__(self, me, world, game, lane):
         super(WorldState, self).__init__()
-        self.my_state = MyState(me, game, world)
+        self.my_state = MyState(me, game, world, lane)
         self.world = world
         self.game = game
 

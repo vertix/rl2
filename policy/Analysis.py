@@ -10,6 +10,7 @@ from model.ActionType import ActionType
 from model.StatusType import StatusType
 from model.BuildingType import BuildingType
 from Geometry import RangeAllowance
+from Geometry import GetLanes
 
 
 WIZARD = 100
@@ -74,9 +75,11 @@ def BuildEnemies(me, world, game, radius):
                    IsEnemy(me, e) 
                    and (e.get_distance_to_unit(me) < radius)]
 
-def PickReachableTarget(me, world, game, cast_range, radius=INFINITY):
+def PickReachableTarget(me, world, game, cast_range, radius=INFINITY, lane=None):
     enemies = [e for e in BuildEnemies(me, world, game, radius) if 
                e.get_distance_to_unit(me) < cast_range + e.radius - CAST_RANGE_ERROR]
+    if lane is not None:
+        enemies = [e for e in enemies if lane in [ll for ll in GetLanes(e)]]
     min_hp = INFINITY
     best_type = 0
     best = None
@@ -97,8 +100,8 @@ def IsEnemy(me, e):
     return ((e.faction != me.faction) and (e.faction != Faction.OTHER) and (
             (e.faction != Faction.NEUTRAL) or (not NeutralMinionInactive(e))))
 
-def PickTarget(me, world, game, radius=INFINITY):
-    best = PickReachableTarget(me, world, game, radius, radius)
+def PickTarget(me, world, game, radius=INFINITY, lane=None):
+    best = PickReachableTarget(me, world, game, radius, radius, lane)
     return best
     
 def PickMeleeTarget(me, world, game):

@@ -13,6 +13,7 @@ from model.LivingUnit import LivingUnit
 from model.Wizard import Wizard
 from model.Minion import Minion
 from model.MinionType import MinionType
+from model.LaneType import LaneType
 
 EPSILON = 1E-4
 MACRO_EPSILON = 2
@@ -24,6 +25,32 @@ WIZARD_DPS = 12.0 / 30.0 * TREE_DISCOUNT # missile or staff every 60 ticks
 WIZARD_SPEED = 4.0  # per tick, going forward
 TICKS_TO_ACCOUNT_FOR = 10
 RADIUS_ALLOWANCE = 4
+HALF_LANE_WIDTH = 500
+
+def GetLanes(u):
+    lanes = []
+    if u is None:
+        return lanes
+    p = Point.FromUnit(u)
+    bottom_left = Point(300, 3700)
+    bottom_right = Point(3700, 3700)
+    top_left = Point(300, 300)
+    top_right = Point(3700, 300)
+    left = Line(bottom_left, top_left)
+    right = Line(bottom_right, top_right)
+    top = Line(top_right, top_left)
+    bottom = Line(bottom_left, bottom_right)
+    diagonal = Line(bottom_left, top_right)
+
+    if ((p.GetDistanceToLine(left) < HALF_LANE_WIDTH) or 
+        (p.GetDistanceToLine(top) < HALF_LANE_WIDTH)):
+        lanes.append(LaneType.TOP)
+    if ((p.GetDistanceToLine(right) < HALF_LANE_WIDTH) or 
+        (p.GetDistanceToLine(bottom) < HALF_LANE_WIDTH)):
+        lanes.append(LaneType.BOTTOM)
+    if p.GetDistanceToLine(diagonal) < HALF_LANE_WIDTH: 
+        lanes.append(LaneType.MIDDLE)
+    return lanes
 
 class Transition(object):
     def __init__(self, begin, end, edge):
