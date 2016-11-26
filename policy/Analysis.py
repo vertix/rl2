@@ -20,7 +20,7 @@ BASE = 100
 CAST_RANGE_ERROR = 5
 EPSILON = 1e-4
 INFINITY = 1e6
-AGGRO_TICKS = 60
+AGGRO_TICKS = 10
 
 def BuildCoeff(coeff):
     return max(0.5, coeff)
@@ -94,8 +94,8 @@ def PickReachableTarget(me, world, game, cast_range, radius=INFINITY):
     return best
     
 def IsEnemy(me, e):
-    return (e.id >= 0) and (e.faction != me.faction) and (e.faction != Faction.OTHER) and (
-            (e.faction != Faction.NEUTRAL) or (not NeutralMinionInactive(e)))
+    return ((e.faction != me.faction) and (e.faction != Faction.OTHER) and (
+            (e.faction != Faction.NEUTRAL) or (not NeutralMinionInactive(e))))
 
 def PickTarget(me, world, game, radius=INFINITY):
     best = PickReachableTarget(me, world, game, radius, radius)
@@ -139,6 +139,7 @@ def GetAggro(me, game, world, safe_distance):
         d = w.get_distance_to_unit(me)
         deepness = w.cast_range + safe_distance - d + me.radius
         if (w.faction != me.faction) and (deepness > 0):
+            
             aggro += GetUnitAggro(me, w, game, deepness)
     for m in world.minions:
         aggro += GetMinionAggro(me, allies, m, game, world, safe_distance)
@@ -147,7 +148,7 @@ def GetAggro(me, game, world, safe_distance):
         deepness = b.attack_range + safe_distance - d
         if (b.faction != me.faction) and (deepness > 0):
             aggro += GetUnitAggro(me, b, game, deepness)
-    if StatusType.SHIELDED in [s.type for s in me.statuses]:
+    if StatusType.SHIELDED in [st.type for st in me.statuses]:
         aggro *= (1.0-game.shielded_direct_damage_absorption_factor) 
     return aggro
     
@@ -157,7 +158,7 @@ def GetRemainingActionCooldown(w, action=ActionType.MAGIC_MISSILE):
                
 def HaveEnoughTimeToTurn(w, angle, target, game, action=ActionType.MAGIC_MISSILE):
     speed = game.wizard_max_turn_angle
-    if StatusType.HASTENED in [s.type for s in w.statuses]:
+    if StatusType.HASTENED in [st.type for st in w.statuses]:
         speed *= game.hastened_rotation_bonus_factor
     return (max((abs(angle) / speed) + 2, 
                 (-RangeAllowance(w, target)) / GetMaxStrafeSpeed(w, game)) < 
@@ -165,19 +166,19 @@ def HaveEnoughTimeToTurn(w, angle, target, game, action=ActionType.MAGIC_MISSILE
             
 def GetWizardDamage(w, game):
     d = game.staff_damage
-    if StatusType.EMPOWERED in [s.type for s in w.statuses]:
+    if StatusType.EMPOWERED in [st.type for st in w.statuses]:
         d = d * (1.0 + game.empowered_damage_factor)
     return d
     
 def GetMaxForwardSpeed(w, game):
     s = game.wizard_forward_speed
-    if StatusType.HASTENED in [s.type for s in w.statuses]:
+    if StatusType.HASTENED in [st.type for st in w.statuses]:
         s = s * (1.0 + game.hastened_movement_bonus_factor)
     return s
     
 def GetMaxStrafeSpeed(w, game):
     s = game.wizard_strafe_speed
-    if StatusType.HASTENED in [s.type for s in w.statuses]:
+    if StatusType.HASTENED in [st.type for st in w.statuses]:
         s = s * (1.0 + game.hastened_movement_bonus_factor)
     return s
 

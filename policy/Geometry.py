@@ -19,8 +19,8 @@ MACRO_EPSILON = 2
 MAX_OBSTACLES = 15
 TARGET_EXTRA_SPACE = 50
 INFINITY = 1e6
-TREE_DISCOUNT = 2
-WIZARD_DPS = 12.0 / 60.0 * TREE_DISCOUNT # missile every 60 ticks
+TREE_DISCOUNT = 1.2
+WIZARD_DPS = 12.0 / 30.0 * TREE_DISCOUNT # missile or staff every 60 ticks
 WIZARD_SPEED = 4.0  # per tick, going forward
 TICKS_TO_ACCOUNT_FOR = 10
 RADIUS_ALLOWANCE = 4
@@ -336,7 +336,7 @@ class Obstacle(CircularUnit):
         CircularUnit.__init__(self, u.id, u.x, u.y, u.speed_x, u.speed_y, u.angle, u.faction, u.radius)
         self.straight_penalty = INFINITY
         if me.faction != u.faction:
-            self.straight_penalty = u.life / WIZARD_DPS * WIZARD_SPEED
+            self.straight_penalty = max(0, u.life - 12) / WIZARD_DPS * WIZARD_SPEED
             
 # returns segment1, segment2, where each segment is [(alpha1, point1), (alpha2, point2)]
 # for corresponding circle

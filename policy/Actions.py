@@ -99,11 +99,12 @@ class MoveAction(object):
         
     def MaybeSetLanes(self, me, move):
         if me.master:
-            move.messages = [Message(LaneType.TOP, None, "0"), 
-                             Message(LaneType.TOP, None, "0"),
-                             Message(LaneType.MIDDLE, None, "0"),
-                             Message(LaneType.MIDDLE, None, "0"),
-                             Message(LaneType.BOTTOM, None, "0")]
+            pass
+            # move.messages = [Message(LaneType.TOP, None, "0"),
+            #                  Message(LaneType.TOP, None, "0"),
+            #                  Message(LaneType.MIDDLE, None, "0"),
+            #                  Message(LaneType.MIDDLE, None, "0"),
+            #                  Message(LaneType.BOTTOM, None, "0")]
 
     def RushToTarget(self, me, target, move, game, world):
         path = Cache.GetInstance().GetPathToTarget(me, target, game, world)
@@ -163,7 +164,7 @@ class MoveAction(object):
         if GetRemainingActionCooldown(me) == 0:
             move.action = ActionType.MAGIC_MISSILE
 
-        if not TargetInRangeWithAllowance(me, t, game.magic_missile_radius):
+        if not TargetInRangeWithAllowance(me, t, -game.magic_missile_radius):
             n_t = PickReachableTarget(me, world, game, me.cast_range)
             if n_t is not None:
                 t = n_t

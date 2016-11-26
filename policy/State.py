@@ -13,6 +13,7 @@ from model.Wizard import Wizard
 from model.World import World
 
 from Analysis import GetAggro
+from Analysis import IsEnemy
 
 # Ideas for features
 # Exp for hit
@@ -122,7 +123,7 @@ class LivingUnitState(State):
     @property
     def enemy(self):
         """Returns 1. if enemy, else 0."""
-        return 1. if (self.unit.faction == 1 - self.me.faction) and (self.unit.id >= 0) else 0.
+        return 1. if IsEnemy(self.me, self.unit) else 0.
 
     @property
     def neutral(self):
@@ -244,7 +245,7 @@ class MyState(WizardState):
         
     @property
     def aggro(self):
-        return GetAggro(self.me, self.game, self.world, 15) #safe_distance
+        return GetAggro(self.me, self.game, self.world, 10) #safe_distance
 
     def _to_numpy_internal(self):
         return np.array([
