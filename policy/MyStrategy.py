@@ -142,7 +142,7 @@ class RemotePolicy(object):
             evts = poller.poll(1000)
             if evts:
                 self.q = QFunction(evts[0][0].recv_pyobj())
-                print 'Recieved coeff'
+                # print 'Recieved coeff'
         print 'Exitting...'
 
     def Act(self, state):
@@ -252,11 +252,12 @@ class MyStrategy:
             rew = 0.
             g = 1.
             for exp in reversed(self.exps):
-                rew += exp['r'] + exp['g'] * rew
-                g *= exp['g']
-                exp['s1'] = s1
-                exp['r'] = rew
-                exp['g'] = g
+		if False:
+                    rew += exp['r'] + exp['g'] * rew
+                    g *= exp['g']
+                    exp['s1'] = s1
+                    exp['r'] = rew
+                    exp['g'] = g
 
                 self.sock.send_pyobj({'type': 'exp', 'data': exp})
                 if self.sock.recv() != "Ok":
@@ -280,10 +281,10 @@ class MyStrategy:
                 self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
                 
         if self.flee_action is None:
-            if zmq and (len(sys.argv) > 3):
-                self.lane = int(sys.argv[3])
-            else:
-                self.lane = np.random.choice(LANES)
+#            if zmq and (len(sys.argv) > 3):
+#                self.lane = int(sys.argv[3])
+#            else:
+            self.lane = np.random.choice(LANES)
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 
@@ -303,8 +304,8 @@ class MyStrategy:
             gamma = GAMMA ** (world.tick_index - self.last_tick)
             self.num_deaths += 1
 
-        # if reward != 0:
-        #     print 'REWARD: %.1f' % reward
+        if reward != 0:
+            print 'REWARD: %.1f' % reward
 
         if self.initialized:
             self.SaveExperience(self.last_state, self.last_action, reward, state, gamma)
