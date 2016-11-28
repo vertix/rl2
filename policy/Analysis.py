@@ -10,6 +10,7 @@ from model.ActionType import ActionType
 from model.StatusType import StatusType
 from model.BuildingType import BuildingType
 from Geometry import RangeAllowance
+from Geometry import GetLanes
 
 
 WIZARD = 100
@@ -20,18 +21,18 @@ BASE = 100
 CAST_RANGE_ERROR = 5
 EPSILON = 1e-4
 INFINITY = 1e6
-AGGRO_TICKS = 10
+AGGRO_TICKS = 20
 
 def BuildCoeff(coeff):
     return max(0.5, coeff)
 
 def GetAggroFromDamage(damage, remaining_cooldown, cooldown, deepness):
-    return max(0, (AGGRO_TICKS + deepness - remaining_cooldown + cooldown - 1) /
-                  cooldown * damage)
+    return (max(0, int(AGGRO_TICKS + deepness - remaining_cooldown + cooldown - 1)) /
+            int(cooldown) * damage)
 
 def GetUnitAggro(me, u, game, deep_in_range):
     aggro = 0
-    speed = GetMaxForwardSpeed(me, game)
+    speed = GetMaxStrafeSpeed(me, game)
     if isinstance(u, Wizard):
         aggro = GetAggroFromDamage(GetWizardDamage(u, game),
                          max(u.remaining_action_cooldown_ticks,
@@ -74,9 +75,11 @@ def BuildEnemies(me, world, game, radius):
                    IsEnemy(me, e) 
                    and (e.get_distance_to_unit(me) < radius)]
 
-def PickReachableTarget(me, world, game, cast_range, radius=INFINITY):
+def PickReachableTarget(me, world, game, cast_range, radius=INFINITY, lane=None):
     enemies = [e for e in BuildEnemies(me, world, game, radius) if 
                e.get_distance_to_unit(me) < cast_range + e.radius - CAST_RANGE_ERROR]
+    if lane is not None:
+        enemies = [e for e in enemies if lane in [ll for ll in GetLanes(e)]]
     min_hp = INFINITY
     best_type = 0
     best = None
@@ -97,8 +100,8 @@ def IsEnemy(me, e):
     return ((e.faction != me.faction) and (e.faction != Faction.OTHER) and (
             (e.faction != Faction.NEUTRAL) or (not NeutralMinionInactive(e))))
 
-def PickTarget(me, world, game, radius=INFINITY):
-    best = PickReachableTarget(me, world, game, radius, radius)
+def PickTarget(me, world, game, radius=INFINITY, lane=None):
+    best = PickReachableTarget(me, world, game, radius, radius, lane)
     return best
     
 def PickMeleeTarget(me, world, game):
@@ -221,7 +224,9 @@ class HistoricStateTracker(object):
         for i, fake_b in enumerate(self.buildings):
             found = False
             for real_b in world.buildings:
-                if (real_b.id >= 0) and (real_b.faction != me.faction):
+                if (real_b.faction != me.faction):
+                    # if real_b.type == BuildingType.FACTION_BASE:
+                    #     import pdb; pdb.set_trace()
                     if ((real_b.get_distance_to_unit(fake_b) < 500) and
                         (real_b.type == fake_b.type)):
                             found = True

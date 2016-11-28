@@ -20,6 +20,8 @@ from model.World import World
 from Analysis import PickTarget
 from Analysis import HistoricStateTracker
 
+from Geometry import GetLanes
+
 import Actions
 import State
 
@@ -81,14 +83,12 @@ MAX_ATTACK_DISTANCE = 1000
 
 
 class DefaultPolicy(object):
-    def __init__(self, lane):
-        self.lane = lane
-
     def Act(self, state):
         enemies = [s for s in state.enemy_states
-                   if s.dist < MAX_ATTACK_DISTANCE]
+                   if (s.dist < MAX_ATTACK_DISTANCE) and 
+                      (state.my_state.lane in GetLanes(s.unit))]
 
-        if state.my_state.hp - 35 < state.my_state.aggro:
+        if state.my_state.hp - 40 < state.my_state.aggro:
             res = 0 # FLEE
         elif enemies:
             u = PickTarget(state.my_state.me, state.world, state.game,
@@ -201,7 +201,7 @@ class MyStrategy:
         if len(sys.argv) > 2 and sys.argv[2] and sys.argv[2] != '0' and zmq:
             self.policy = RemotePolicy(sys.argv[2], NUM_ACTIONS)
         else:
-            self.policy = DefaultPolicy(random.choice(LANES))
+            self.policy = DefaultPolicy()
 
         self.last_score = 0.
         self.initialized = False
@@ -288,7 +288,7 @@ class MyStrategy:
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 
-        state = State.WorldState(me, world, game)
+        state = State.WorldState(me, world, game, self.lane)
         noop = Actions.NoOpAction()
 
         targets = [enemy.unit for enemy in state.enemy_states
