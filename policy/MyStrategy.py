@@ -152,7 +152,7 @@ class RemotePolicy(object):
             evts = poller.poll(1000)
             if evts:
                 self.q = QFunction(evts[0][0].recv_pyobj())
-                print 'Recieved coeff'
+                # print 'Recieved coeff'
         print 'Exitting...'
 
     def Act(self, state):
@@ -161,6 +161,21 @@ class RemotePolicy(object):
 
         if np.random.rand() < epsilon or self.q is None:
             return np.random.randint(0, self.max_actions)
+
+        if False:
+            values = self.q.Q(state.to_numpy())
+            res = np.argmax(values)
+            debug = []
+            for i, (act, v) in enumerate(zip(self.actions_debug, values)):
+                act = act.rjust(8)
+                if i == res:
+                    act = '*' + act
+                else:
+                    act = ' ' + act
+                v = ('%.2f' % v).rjust(7)
+                debug.append('%s:%s' % (act, v))
+            print ' '.join(debug)
+            return res
 
         res, val = self.q.Select(state)
         # action = (['FLEE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
@@ -251,11 +266,12 @@ class MyStrategy:
             rew = 0.
             g = 1.
             for exp in reversed(self.exps):
-                rew += exp['r'] + exp['g'] * rew
-                g *= exp['g']
-                exp['s1'] = s1
-                exp['r'] = rew
-                exp['g'] = g
+		if False:
+                    rew += exp['r'] + exp['g'] * rew
+                    g *= exp['g']
+                    exp['s1'] = s1
+                    exp['r'] = rew
+                    exp['g'] = g
 
                 self.sock.send_pyobj({'type': 'exp', 'data': exp})
                 if self.sock.recv() != "Ok":
@@ -282,10 +298,10 @@ class MyStrategy:
                 self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
                 
         if self.flee_action is None:
-            if zmq and (len(sys.argv) > 3):
-                self.lane = int(sys.argv[3])
-            else:
-                self.lane = np.random.choice(LANES)
+#            if zmq and (len(sys.argv) > 3):
+#                self.lane = int(sys.argv[3])
+#            else:
+            self.lane = np.random.choice(LANES)
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 
@@ -306,8 +322,8 @@ class MyStrategy:
             gamma = GAMMA ** (world.tick_index - self.last_tick)
             self.num_deaths += 1
 
-        # if reward != 0:
-        #     print 'REWARD: %.1f' % reward
+        if reward != 0:
+            print 'REWARD: %.1f' % reward
 
         if self.initialized:
             self.SaveExperience(self.last_state, self.last_action, reward, state, gamma)
