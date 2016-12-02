@@ -32,6 +32,14 @@ except ImportError:
     print "ZMQ is not availabe"
     zmq = None
 
+debug = None
+try:
+    from debug_client import DebugClient
+except:
+    debug = None
+else:
+    debug = DebugClient()
+
 
 MAX_TARGETS_NUM = 5
 
@@ -84,14 +92,16 @@ MAX_ATTACK_DISTANCE = 1000
 
 class DefaultPolicy(object):
     def Act(self, state):
-        enemies = [s for s in state.enemy_states
-                   if (s.dist < MAX_ATTACK_DISTANCE) and 
-                      (state.my_state.lane in GetLanes(s.unit))]
-
-        if state.my_state.hp - 40 < state.my_state.aggro:
+        enemies = []
+        for s in state.enemy_states:
+            if s.dist < MAX_ATTACK_DISTANCE:
+                state.dbg_text(s.unit, ', '.join([str(l) for l in GetLanes(s.unit)]))
+                if state.my_state.lane in GetLanes(s.unit):
+                    enemies.append(s)
+        if state.my_state.hp - state.my_state.unit.max_life * 0.8 < state.my_state.aggro:
             res = 0 # FLEE
         elif enemies:
-            u = PickTarget(state.my_state.me, state.world, state.game,
+            u = PickTarget(state.my_state.me, ActionType.MAGIC_MISSILE, state,
                            radius=MAX_ATTACK_DISTANCE)
             if u:
                 e_ids = [e.unit.id for e in enemies[:MAX_TARGETS_NUM]]
@@ -168,7 +178,11 @@ LANES = [LaneType.TOP, LaneType.MIDDLE, LaneType.BOTTOM]
 GAMMA = 0.995
 Q_N_STEPS = 20
 
-def GetLane(messages):
+def GetLane(me):
+    return LaneType.BOTTOM
+    if me.master:
+        return LaneType.MIDDLE
+    messages = me.messages
     for m in reversed(messages):
         if m.lane is not None:
             return m.lane
@@ -190,7 +204,7 @@ class MyStrategy:
 
         self.last_score = 0.
         self.initialized = False
-        self.last_state = {}
+        self.last_state = None
         self.last_action = -1
         self.last_tick = None
         self.num_deaths = 0
@@ -220,7 +234,7 @@ class MyStrategy:
         self.policy.Stop()
 
     def SaveExperience(self, s, a, r, s1, gamma):
-        if not self.sock or not s:
+        if not self.sock or (s is None):
             return
 
         s1 = s1.to_numpy() if s1 else None
@@ -255,10 +269,13 @@ class MyStrategy:
         @type game: Game
         @type move: Move
         """
+        if debug:
+            debug.post()
+            debug.start()
         HistoricStateTracker.GetInstance(me, world).AddInvisibleBuildings(me, world, game)
         # print world.tick_index
         if world.tick_index < 10:
-            l = GetLane(me.messages)
+            l = GetLane(me)
             if l is not None:
                 self.lane = l
                 self.flee_action = Actions.FleeAction(game.map_size, self.lane)
@@ -272,7 +289,8 @@ class MyStrategy:
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 
-        state = State.WorldState(me, world, game, self.lane)
+        state = None
+        state = State.WorldState(me, world, game, self.lane, self.last_state, debug)
         noop = Actions.NoOpAction()
 
         targets = [enemy.unit for enemy in state.enemy_states
@@ -294,7 +312,7 @@ class MyStrategy:
         if self.initialized:
             self.SaveExperience(self.last_state, self.last_action, reward, state, gamma)
 
-        my_move = actions[a].Act(me, world, game)
+        my_move = actions[a].Act(me, state)
         for attr in ['speed', 'strafe_speed', 'turn', 'action', 'cast_angle', 'min_cast_distance',
                      'max_cast_distance', 'status_target_id', 'skill_to_learn', 'messages']:
             setattr(move, attr, getattr(my_move, attr))
@@ -304,4 +322,6 @@ class MyStrategy:
         self.last_action = a
         self.initialized = True
         self.last_tick = world.tick_index
+        if debug:
+            debug.stop()
         # print world.tick_index

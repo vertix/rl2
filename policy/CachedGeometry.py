@@ -24,12 +24,12 @@ class Cache(object):
         self.paths[key] = value
         heappush(self.times_and_keys, (tick, key))
 
-    def GetEntryFor(self, key, me, t, game, world):
-        self.InvalidateOldCache(world.tick_index)
+    def GetEntryFor(self, key, me, t, state):
+        self.InvalidateOldCache(state.world.tick_index)
         if key in self.paths:
             return self.paths[key]
-        path = BuildPath(me, t, game, world)
-        self.AddEntry(key, path, world.tick_index)
+        path = BuildPath(me, t, state)
+        self.AddEntry(key, path, state.world.tick_index)
         return path        
         
     def BuildKey(self, u):
@@ -41,7 +41,7 @@ class Cache(object):
             key += 'r:%d' % int(u.radius)
         return key
         
-    def GetPathToTarget(self, me, t, game, world):
+    def GetPathToTarget(self, me, t, state):
         key = self.BuildKey(t)
-        return self.GetEntryFor(key, me, t, game, world)
+        return self.GetEntryFor(key, me, t, state)
     
