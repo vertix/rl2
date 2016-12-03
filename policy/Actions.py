@@ -132,7 +132,6 @@ class MoveAction(object):
             move.messages = [Message(LaneType.MIDDLE, None, ''),
                              Message(LaneType.TOP, None, ''),
                              Message(LaneType.TOP, None, ''),
-                             Message(LaneType.MIDDLE, None, ''),
                              Message(LaneType.BOTTOM, None, '')]
     def MaybeDodge(self, move, state):
         for p in state.world.projectiles:
@@ -220,8 +219,9 @@ class MoveAction(object):
             if n_t is not None:
                 t = n_t
                 distance = me.get_distance_to_unit(t)
-                if not TargetInRangeWithAllowance(
-                    me, t, -state.game.magic_missile_radius, state):
+                if (not TargetInRangeWithAllowance(me, t, -state.game.magic_missile_radius, state) or
+                    (isinstance(t, Wizard) and 
+                     not CanHitWizard(me, t, ActionType.MAGIC_MISSILE, state, True))):
                     move.action = ActionType.NONE
             else:
                 move.action = ActionType.NONE

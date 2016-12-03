@@ -32,21 +32,21 @@ def GetAggroFromDamage(damage, remaining_cooldown, cooldown, deepness):
 
 def GetUnitAggro(mes, us, deep_in_range, state):
     aggro = 0.0
-    speed = mes.max_speed
+    speed = mes.forward_speed
     from State import WizardState
     if isinstance(us, WizardState):
         aggro = GetAggroFromDamage(us.fireball,
                          us.fireball_cooldown,
                          us.fireball_total_cooldown,
-                         deep_in_range / max(1.0, speed - us.max_speed / 3.0))
+                         deep_in_range / max(1.0, speed - us.strafe_speed / 3.0))
         aggro += GetAggroFromDamage(us.frost_bolt,
                          us.frost_bolt_cooldown,
                          us.frost_bolt_total_cooldown,
-                         deep_in_range / max(1.0, speed - us.max_speed / 3.0))
+                         deep_in_range / max(1.0, speed - us.strafe_speed / 3.0))
         aggro += GetAggroFromDamage(us.missile,
                          us.missile_cooldown,
                          us.missile_total_cooldown,
-                         deep_in_range / max(1.0, speed - us.max_speed / 3.0))
+                         deep_in_range / max(1.0, speed - us.strafe_speed / 3.0))
         if us.dist < state.game.staff_range:
             aggro += GetAggroFromDamage(us.staff,
                                         us.staff_cooldown,
