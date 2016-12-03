@@ -1,2 +1,4 @@
 **/*.pyc
 local-runner/game.log
+policy/*0000
+policy/*0000.meta
