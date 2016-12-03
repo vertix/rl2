@@ -55,27 +55,37 @@ def BatchNorm(state, network_vars, key):
     return state * inv + (network_vars[key + '/beta:0'] - network_vars[key + '/moving_mean:0'] * inv)
 
 
+def Softmax(state):
+    state -= np.max(state)
+    e = np.exp(state)
+    return e / np.sum(e)
+        
+
 class QFunction(object):
     def __init__(self, network_vars):
         self.vars = network_vars
 
     def Q(self, state):
         state = np.matmul(state, self.vars['model/hidden1/weights:0'])
-        state = BatchNorm(state, self.vars, 'model/hidden1/BatchNorm')
+        state += self.vars['model/hidden1/biases:0']
+        # state = BatchNorm(state, self.vars, 'model/hidden1/BatchNorm')
         state = ReLu(state)
 
-        # state = np.matmul(state, self.vars['model/hidden2/weights:0'])
+        state = np.matmul(state, self.vars['model/hidden2/weights:0'])
+        state += self.vars['model/hidden2/biases:0']
         # state = BatchNorm(state, self.vars, 'model/hidden2/BatchNorm')
-        # state = ReLu(state)
+        state = ReLu(state)
 
         value = np.matmul(state, self.vars['model/val_hid/weights:0'])
-        value = BatchNorm(value, self.vars, 'model/val_hid/BatchNorm')
+        value += self.vars['model/val_hid/biases:0']
+        # value = BatchNorm(value, self.vars, 'model/val_hid/BatchNorm')
         value = ReLu(value)
         value = np.matmul(value, self.vars['model/value/weights:0'])
         value += self.vars['model/value/biases:0']
 
         adv = np.matmul(state, self.vars['model/adv_hid/weights:0'])
-        adv = BatchNorm(adv, self.vars, 'model/adv_hid/BatchNorm')
+        adv += self.vars['model/adv_hid/biases:0']
+        # adv = BatchNorm(adv, self.vars, 'model/adv_hid/BatchNorm')
         adv = ReLu(adv)
         adv = np.matmul(adv, self.vars['model/advantage/weights:0'])
         adv += self.vars['model/advantage/biases:0']
@@ -178,6 +188,7 @@ LANES = [LaneType.TOP, LaneType.MIDDLE, LaneType.BOTTOM]
 GAMMA = 0.995
 Q_N_STEPS = 20
 
+
 def GetLane(me):
     if me.master:
         return LaneType.MIDDLE
@@ -186,6 +197,7 @@ def GetLane(me):
         if m.lane is not None:
             return m.lane
     return None
+
 
 class MyStrategy:
     def __init__(self):
@@ -221,7 +233,7 @@ class MyStrategy:
             print 'Final reward is %d' % r
 
         self.SaveExperience(self.last_state, self.last_action, r, None, 0.)
-        if self.sock:
+        if self.sock and not isinstance(self.policy, DefaultPolicy):
             self.sock.send_pyobj({
                 'type':'stat',
                 'data': {
@@ -250,11 +262,12 @@ class MyStrategy:
             rew = 0.
             g = 1.
             for exp in reversed(self.exps):
-                rew += exp['r'] + exp['g'] * rew
-                g *= exp['g']
-                exp['s1'] = s1
-                exp['r'] = rew
-                exp['g'] = g
+                # if False:
+                #     rew += exp['r'] + exp['g'] * rew
+                #     g *= exp['g']
+                #     exp['s1'] = s1
+                #     exp['r'] = rew
+                #     exp['g'] = g
 
                 self.sock.send_pyobj({'type': 'exp', 'data': exp})
                 if self.sock.recv() != "Ok":

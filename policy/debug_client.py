@@ -32,7 +32,7 @@ class DebugClient(object):
             try:
                 self.socket.connect((host or self.DEFAULT_HOST, port or self.DEFAULT_PORT))
             except socket.error as ex:
-                if ex.errno == errno.WSAECONNREFUSED:
+                if hasattr(errno, 'WSAECONNREFUSED') and ex.errno == errno.WSAECONNREFUSED:
                     time.sleep(0.1)
                     continue
                 raise
