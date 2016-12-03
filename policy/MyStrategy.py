@@ -203,7 +203,9 @@ LANES = [LaneType.TOP, LaneType.MIDDLE, LaneType.BOTTOM]
 GAMMA = 0.995
 Q_N_STEPS = 20
 
+
 def GetLane(me):
+    return np.random.choice(LANES)
     return LaneType.BOTTOM
     if me.master:
         return LaneType.MIDDLE
@@ -212,6 +214,7 @@ def GetLane(me):
         if m.lane is not None:
             return m.lane
     return None
+
 
 class MyStrategy:
     def __init__(self):

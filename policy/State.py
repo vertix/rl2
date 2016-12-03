@@ -1,3 +1,4 @@
+import itertools
 import math
 
 import numpy as np
@@ -85,10 +86,12 @@ class State(object):
             self.numpy_cache = self._to_numpy_internal()
         return self.numpy_cache
 
+
 class TreeState(State):
     def __init__(self, t, me, dbg):
         super(TreeState, self).__init__(t, me, dbg)
         self.unit = t
+
 
 class ProjectileState(State):
     def __init__(self, p, me, game, world, last_state, dbg):
@@ -148,7 +151,6 @@ class ProjectileState(State):
         self.border2 = Segment(
             start_point - shift,
             self.expected_end - shift)
-        
 
     @property
     def start(self):
@@ -203,6 +205,8 @@ class ProjectileState(State):
             self.max_direct_damage, self.overtime_damage, self.speed,
             self.freeze_time
         ])
+
+PROJECTILE_STATE_SIZE = 11
 
 class LivingUnitState(State):
     def __init__(self, unit, me, game, world, dbg):
@@ -318,6 +322,46 @@ class LivingUnitState(State):
     def expected_overtime_damage(self):
         return self.dots
 
+    @property
+    def frost_bolt(self):
+        return 0.0
+
+    @property
+    def frost_bolt_cooldown(self):
+        return 0.0
+
+    @property
+    def fireball(self):
+        return 0.0
+        
+    @property
+    def fireball_cooldown(self):
+        return 0.0
+        
+    @property
+    def missile(self):
+        return 0.0
+        
+    @property
+    def missile_cooldown(self):
+        return 0.0
+    
+    @property
+    def staff(self):
+        return 0.0
+
+    @property
+    def hp_regen(self):
+        return 0.0
+
+    @property
+    def forward_speed(self):
+        return 0.0
+
+    @property
+    def strafe_speed(self):
+        return 0.0
+        
     def _to_numpy_internal(self):
         return np.array([
             self.hp, self.max_hp, self.mana, self.max_mana,
@@ -326,65 +370,14 @@ class LivingUnitState(State):
             self.rel_speed[0], self.rel_speed[1], self.rel_angle,
             self.dist, self.attack_range, self.vision_range, self.cooldown_ticks,
             self.is_on_top_lane, self.is_on_middle_lane, self.is_on_bottom_lane,
-            self.total_cooldown_ticks, self.aggro_range, self.expected_overtime_damage
+            self.total_cooldown_ticks, self.aggro_range, self.expected_overtime_damage,
+            self.frost_bolt, self.frost_bolt_cooldown, self.fireball,
+            self.fireball_cooldown, self.missile, self.missile_cooldown,
+            self.staff, self.hp_regen, self.forward_speed, self.strafe_speed
         ])
 
 
-class ZeroState(LivingUnitState):
-    def __init__(self):
-        super(ZeroState, self).__init__(None, None, None, None, None)
-
-    @property
-    def hp(self):
-        return 0.
-    @property
-    def max_hp(self):
-        return 0.
-    @property
-    def position(self):
-        return (0., 0.)
-    @property
-    def speed(self):
-        return (0., 0.)
-    @property
-    def angle(self):
-        return 0.
-    @property
-    def rel_position(self):
-        return (0., 0.)
-    @property
-    def radius(self):
-        return 0.
-    @property
-    def rel_speed(self):
-        return (0., 0.)
-    @property
-    def max_speed(self):
-        return 0.
-    @property
-    def rel_angle(self):
-        return 0.
-    @property
-    def dist(self):
-        return 0.
-    @property
-    def attack_range(self):
-        return 0.
-    @property
-    def vision_range(self):
-        return 0.
-    @property
-    def cooldown_ticks(self):
-        return 0.
-    @property
-    def total_cooldown_ticks(self):
-        return 0.
-    @property
-    def enemy(self):
-        return 0.
-    @property
-    def neutral(self):
-        return 0.
+LIVING_UNIT_STATE_SIZE = 36
 
 
 class WizardState(LivingUnitState):
@@ -514,66 +507,27 @@ class WizardState(LivingUnitState):
         return self.max_effective_speed
 
     @property
-    def forward_speed(self):
-        return self.max_forward_speed
-
-    @property
-    def strafe_speed(self):
-        return self.max_strafe_speed
-
-    @property
     def attack_range(self):
         return self.effective_range
     
     @property
     def aggro_range(self):
         return self.effective_range
-    
-    @property
-    def missile(self):
-        return self.get_effective_damage_by_me(self.game.magic_missile_direct_damage)
 
     @property
-    def frost_bolt(self):
-        return (self.get_effective_damage_by_me(self.game.frost_bolt_direct_damage) 
-                if self.has_frost_bolt else 0.0)
+    def cooldown_ticks(self):
+        return max(self.unit.remaining_action_cooldown_ticks,
+                   min(self.missile_cooldown, self.fireball_cooldown,
+                       self.frost_bolt_cooldown))
 
-    @property
-    def fireball(self):
-        return (self.get_effective_damage_by_me(self.game.fireball_explosion_max_damage) +
-                self.game.burning_summary_damage
-                if self.has_fireball else 0.0)
-    
-    @property
-    def staff(self):
-        return (self.game.staff_damage + self.s_damage_increase) * self.damage_factor
-        
     @property
     def damage(self):
-        return max(self.fireball_cooldown, self.frost_bolt, self.missile)
+        return max(self.fireball, self.frost_bolt, self.missile)
         
-    @property
-    def frost_bolt_cooldown(self):
-        return max(self.unit.remaining_cooldown_ticks_by_action[ActionType.FROST_BOLT],
-                   (self.game.frost_bolt_manacost - self.mana) / self.mana_regen,
-                   self.unit.remaining_action_cooldown_ticks)
-
     @property
     def staff_cooldown(self):
         return self.unit.remaining_action_cooldown_ticks
 
-    @property
-    def fireball_cooldown(self):
-        return max(self.unit.remaining_cooldown_ticks_by_action[ActionType.FIREBALL],
-                   (self.game.fireball_manacost - self.mana) / self.mana_regen,
-                   self.unit.remaining_action_cooldown_ticks)
-        
-    @property
-    def missile_cooldown(self):
-        return max(self.unit.remaining_action_cooldown_ticks,
-                   self.unit.remaining_cooldown_ticks_by_action[ActionType.MAGIC_MISSILE],
-                   (self.game.magic_missile_manacost - self.mana) / self.mana_regen)
-        
     @property
     def frost_bolt_total_cooldown(self):
         return self.game.frost_bolt_cooldown_ticks
@@ -606,6 +560,43 @@ class WizardState(LivingUnitState):
     def mana_regen(self):
         return (self.game.wizard_base_mana_regeneration +
                 self.unit.level * self.game.wizard_mana_regeneration_growth_per_level)
+    
+    @property
+    def frost_bolt(self):
+        return (self.get_effective_damage_by_me(self.game.frost_bolt_direct_damage) 
+                if self.has_frost_bolt else 0.0)
+
+    @property
+    def frost_bolt_cooldown(self):
+        return max(self.unit.remaining_cooldown_ticks_by_action[ActionType.FROST_BOLT],
+                   (self.game.frost_bolt_manacost - self.mana) / self.mana_regen,
+                   self.unit.remaining_action_cooldown_ticks)
+
+    @property
+    def fireball(self):
+        return (self.get_effective_damage_by_me(self.game.fireball_explosion_max_damage) +
+                self.game.burning_summary_damage
+                if self.has_fireball else 0.0)
+        
+    @property
+    def fireball_cooldown(self):
+        return max(self.unit.remaining_cooldown_ticks_by_action[ActionType.FIREBALL],
+                   (self.game.fireball_manacost - self.mana) / self.mana_regen,
+                   self.unit.remaining_action_cooldown_ticks)
+        
+    @property
+    def missile(self):
+        return self.get_effective_damage_by_me(self.game.magic_missile_direct_damage)
+        
+    @property
+    def missile_cooldown(self):
+        return max(self.unit.remaining_action_cooldown_ticks,
+                   self.unit.remaining_cooldown_ticks_by_action[ActionType.MAGIC_MISSILE],
+                   (self.game.magic_missile_manacost - self.mana) / self.mana_regen)
+    
+    @property
+    def staff(self):
+        return (self.game.staff_damage + self.s_damage_increase) * self.damage_factor
 
     @property
     def hp_regen(self):
@@ -613,18 +604,12 @@ class WizardState(LivingUnitState):
                 self.unit.level * self.game.wizard_life_regeneration_growth_per_level)
 
     @property
-    def cooldown_ticks(self):
-        return max(self.unit.remaining_action_cooldown_ticks,
-                   min(self.missile_cooldown, self.fireball_cooldown,
-                       self.frost_bolt_cooldown))
-        
-    def _to_numpy_internal(self):
-        return (super(WizardState, self)._to_numpy_internal() +
-                np.array([
-                            self.frost_bolt, self.frost_bolt_cooldown, self.fireball,
-                            self.fireball_cooldown, self.missile, self.missile_cooldown,
-                            self.staff, self.hp_regen, self.forward_speed, self.strafe_speed
-                        ]))
+    def forward_speed(self):
+        return self.max_forward_speed
+
+    @property
+    def strafe_speed(self):
+        return self.max_strafe_speed
 
 
 class BuildingState(LivingUnitState):
@@ -654,6 +639,7 @@ class BuildingState(LivingUnitState):
     @property
     def total_cooldown_ticks(self):
         return self.unit.cooldown_ticks
+
 
 class MinionState(LivingUnitState):
     def __init__(self, m, me, game, world, global_state):
@@ -692,6 +678,12 @@ class MinionState(LivingUnitState):
     @property
     def total_cooldown_ticks(self):
         return self.unit.cooldown_ticks
+        
+    @property
+    def forward_speed(self):
+        return self.game.minion_speed
+
+
 
 class MyState(WizardState):
     def __init__(self, me, game, world, lane, world_state):
@@ -709,12 +701,10 @@ class MyState(WizardState):
         return self.lane
 
     def _to_numpy_internal(self):
-        return super(WizardState, self)._to_numpy_internal() + np.array([
-                self.aggro, self.current_lane,
-               ])
+        return np.hstack([super(MyState, self)._to_numpy_internal(),
+                          np.array([self.aggro, self.current_lane])])
 
 
-ZERO_NUMPY = ZeroState().to_numpy()
 MAX_ENEMIES = 10
 MAX_FRIENDS = 10
 MAX_PROJECTILES = 5
@@ -729,27 +719,31 @@ class WorldState(State):
 
         self.world = world
         self.game = game
-        self.minion_targets = [[]] * 3
+        self.minion_targets = [list() for _ in xrange(3)]
         for f in [Faction.ACADEMY, Faction.RENEGADES, Faction.NEUTRAL]:
             self.minion_targets[f] = BuildMinionTargets(f, world)
         
-        states = [TreeState(t, me, dbg) for t in world.trees]
-        states += [ProjectileState(p, me, game, world, last_state, dbg) for p in world.projectiles]
-        states += [WizardState(w, me, game, world, dbg) for w in world.wizards if w != me]
+        self.tree_states = [TreeState(t, me, dbg) for t in world.trees]
+        self.projectile_states = [ProjectileState(p, me, game, world, last_state, dbg) for p in world.projectiles]
+
+        states = [WizardState(w, me, game, world, dbg) for w in world.wizards if w != me]
         states += [MinionState(m, me, game, world, self) for m in world.minions]
         states += [BuildingState(b, me, game, world, dbg) for b in world.buildings]
 
         states = sorted(states, key=lambda x: x.dist)
         self.index = {}
-        for s in states:
+        for s in itertools.chain(states, self.tree_states, self.projectile_states):
             self.index[s.unit.id] = s
 
         self.my_state = MyState(me, game, world, lane, self)
 
         self.enemy_states = [s for s in states if s.enemy][:MAX_ENEMIES]
+        for s in self.enemy_states:
+            assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
         self.friend_states = [s for s in states if not s.enemy][:MAX_FRIENDS]
-        self.projectile_states = [s for s in states
-                                  if isinstance(s, ProjectileState)][:MAX_PROJECTILES]
+        for s in self.friend_states:
+            assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
+
 
     @property
     def ticks_until_end(self):
@@ -757,11 +751,12 @@ class WorldState(State):
         return self.world.tick_count - self.world.tick_index
 
     def _to_numpy_internal(self):
+        # import pdb; pdb.set_trace()
         return np.hstack([self.my_state.to_numpy()] +
                          [s.to_numpy() for s in self.enemy_states] +
-                         [ZERO_NUMPY] * (MAX_ENEMIES - len(self.enemy_states)) +
+                         [np.zeros(LIVING_UNIT_STATE_SIZE)] * (MAX_ENEMIES - len(self.enemy_states)) +
                          [s.to_numpy() for s in self.friend_states] +
-                         [ZERO_NUMPY] * (MAX_FRIENDS - len(self.friend_states)) +
-                         [s.to_numpy() for s in self.projectile_states] +
-                         [ZERO_NUMPY] * (MAX_PROJECTILES - len(self.projectile_states)) +
+                         [np.zeros(LIVING_UNIT_STATE_SIZE)] * (MAX_FRIENDS - len(self.friend_states)) +
+                         [s.to_numpy() for s in self.projectile_states[:MAX_PROJECTILES]] +
+                         [np.zeros(PROJECTILE_STATE_SIZE)] * (MAX_PROJECTILES - len(self.projectile_states)) +
                          [np.array([self.ticks_until_end])])

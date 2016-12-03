@@ -134,6 +134,7 @@ class MoveAction(object):
                              Message(LaneType.TOP, None, ''),
                              Message(LaneType.MIDDLE, None, ''),
                              Message(LaneType.BOTTOM, None, '')]
+
     def MaybeDodge(self, move, state):
         for p in state.world.projectiles:
             ps = state.index[p.id]
