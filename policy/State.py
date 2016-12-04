@@ -225,6 +225,9 @@ class LivingUnitState(State):
                               game.burning_duration_ticks *
                               game.burning_summary_damage)
 
+    def get_effective_damage_to_me(self, nominal_damage):
+        return nominal_damage
+                              
     @property
     def hp(self):
         return self.unit.life
@@ -386,10 +389,11 @@ class WizardState(LivingUnitState):
         missile_radius = game.magic_missile_radius
         self.has_frost_bolt = SkillType.FROST_BOLT in w.skills
         self.has_fireball = SkillType.FIREBALL in w.skills
+        missile_radius = game.magic_missile_radius
         if self.has_frost_bolt:
-            missile_radius = max(ret, game.frost_bolt_radius)
+            missile_radius = max(missile_radius, game.frost_bolt_radius)
         if self.has_fireball:
-            missile_radius = max(ret, game.fireball_explosion_min_damage_range)
+            missile_radius = max(missile_radius, game.fireball_explosion_min_damage_range)
         self.effective_range = w.cast_range + missile_radius
         self.hastened = StatusType.HASTENED in [st.type for st in w.statuses]
         
@@ -469,15 +473,15 @@ class WizardState(LivingUnitState):
         self.absorption = 0.0
         self.absorption_factor = 0.0
         if StatusType.SHIELDED in [st.type for st in w.statuses]:
-            self.absorption_factor += shielded_direct_damage_absorption_factor
+            self.absorption_factor += game.shielded_direct_damage_absorption_factor
         if SkillType.MAGICAL_DAMAGE_ABSORPTION_PASSIVE_1 in w.skills:
-            self.absorption += magical_damage_absorption_per_skill_level
+            self.absorption += game.magical_damage_absorption_per_skill_level
         if SkillType.MAGICAL_DAMAGE_ABSORPTION_PASSIVE_2 in w.skills:
-            self.absorption += magical_damage_absorption_per_skill_level
+            self.absorption += game.magical_damage_absorption_per_skill_level
         if shield_aura1:
-            self.absorption += magical_damage_absorption_per_skill_level
+            self.absorption += game.magical_damage_absorption_per_skill_level
         if shield_aura2:
-            self.absorption += magical_damage_absorption_per_skill_level
+            self.absorption += game.magical_damage_absorption_per_skill_level
     
     def get_effective_damage_to_me(self, nominal_damage):
         return max(0.0, nominal_damage - self.absorption) * (1.0 - self.absorption_factor) 
@@ -709,6 +713,17 @@ MAX_ENEMIES = 10
 MAX_FRIENDS = 10
 MAX_PROJECTILES = 5
 
+def clean_world(me, world):
+    new_trees = []
+    for t in world.trees:
+        if t.get_distance_to_unit(me) < 1000:
+            new_trees.append(t)
+    world.trees = new_trees
+    new_p = []
+    for p in world.projectiles:
+        if p.get_distance_to_unit(me) < 1000:
+            new_p.append(p)
+    world.projectiles = new_p
 
 class WorldState(State):
     def __init__(self, me, world, game, lane, last_state, dbg):
@@ -718,6 +733,7 @@ class WorldState(State):
             self.last_state = last_state
 
         self.world = world
+        clean_world(me, world)
         self.game = game
         self.minion_targets = [list() for _ in xrange(3)]
         for f in [Faction.ACADEMY, Faction.RENEGADES, Faction.NEUTRAL]:

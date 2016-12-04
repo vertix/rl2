@@ -25,6 +25,7 @@ CAST_RANGE_ERROR = 0
 EPSILON = 1e-4
 INFINITY = 1e6
 AGGRO_TICKS = 20
+MAX_RANGE = 1000
 
 def GetAggroFromDamage(damage, remaining_cooldown, cooldown, deepness):
     return (max(0, int(AGGRO_TICKS + deepness - remaining_cooldown + cooldown - 1)) /
@@ -32,21 +33,21 @@ def GetAggroFromDamage(damage, remaining_cooldown, cooldown, deepness):
 
 def GetUnitAggro(mes, us, deep_in_range, state):
     aggro = 0.0
-    speed = mes.max_speed
+    speed = mes.forward_speed
     from State import WizardState
     if isinstance(us, WizardState):
         aggro = GetAggroFromDamage(us.fireball,
                          us.fireball_cooldown,
                          us.fireball_total_cooldown,
-                         deep_in_range / max(1.0, speed - us.max_speed / 3.0))
+                         deep_in_range / max(1.0, speed - us.strafe_speed / 3.0))
         aggro += GetAggroFromDamage(us.frost_bolt,
                          us.frost_bolt_cooldown,
                          us.frost_bolt_total_cooldown,
-                         deep_in_range / max(1.0, speed - us.max_speed / 3.0))
+                         deep_in_range / max(1.0, speed - us.strafe_speed / 3.0))
         aggro += GetAggroFromDamage(us.missile,
                          us.missile_cooldown,
                          us.missile_total_cooldown,
-                         deep_in_range / max(1.0, speed - us.max_speed / 3.0))
+                         deep_in_range / max(1.0, speed - us.strafe_speed / 3.0))
         if us.dist < state.game.staff_range:
             aggro += GetAggroFromDamage(us.staff,
                                         us.staff_cooldown,
@@ -78,13 +79,15 @@ def ClosestUnit(x, units):
     a = None
     xp = Point.FromUnit(x)
     for u in units:
+        if u.id == -21:
+            import pdb; pdb.set_trace()
         d = xp.GetSqDistanceTo(u)
         if res > d:
             res = d
             a = u 
     return a
     
-def GetClosestTarget(me, state, radius=INFINITY):
+def GetClosestTarget(me, state, radius=MAX_RANGE):
     return ClosestUnit(me, BuildTargets(me, min(radius, me.vision_range*2), state))
     
 def BuildEnemies(me, radius, state):
@@ -148,8 +151,8 @@ def CanHitWizard(me, w, action, state, strict=False):
                          world=state.world, last_state=state, dbg=state.dbg)
     return not CanDodge(w, ps, state)
 
-def PickReachableTarget(me, cast_range, action, state, radius=INFINITY, lane=None):
-    enemies = [e for e in BuildEnemies(me, radius, state) if 
+def PickReachableTarget(me, cast_range, action, state, radius=MAX_RANGE, lane=None):
+    enemies = [e for e in BuildTargets(me, radius, state) if 
                e.get_distance_to_unit(me) < cast_range + e.radius - CAST_RANGE_ERROR]
     if lane is not None:
         enemies = [e for e in enemies if (lane in GetLanes(e))]
@@ -180,9 +183,15 @@ def IsEnemy(u1, u2):
 
 def IsValidTarget(u1, u2, state):
     u2s = state.index[u2.id]
-    if isinstance(u2, Building) and (u2.type == BuildingType.GUARDIAN_TOWER):
+    if (isinstance(u2, Building) and (u2.type == BuildingType.GUARDIAN_TOWER)
+        and (u2.x > 2600 and u2.y < 1400)):
+        # if not u2s.is_on_middle_lane:
+        #     import pdb; pdb.set_trace()
+        
         towers_this_lane = 0
         for b in state.world.buildings:
+            if (b.faction != u2.faction) or (b.type != BuildingType.GUARDIAN_TOWER):
+                continue
             if u2s.is_on_top_lane and state.index[b.id].is_on_top_lane:
                 towers_this_lane += 1
             if u2s.is_on_middle_lane and state.index[b.id].is_on_middle_lane:
@@ -194,7 +203,7 @@ def IsValidTarget(u1, u2, state):
     return IsEnemy(u1, u2)
 
 
-def PickTarget(me, action, state, radius=INFINITY, lane=None):
+def PickTarget(me, action, state, radius=MAX_RANGE, lane=None):
     best = PickReachableTarget(me, radius, action, state, radius, lane)
     return best
     

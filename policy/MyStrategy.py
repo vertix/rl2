@@ -140,26 +140,17 @@ class NNPolicy(object):
 
 class DefaultPolicy(object):
     def Act(self, state):
-        enemies = []
-        for s in state.enemy_states:
-            if s.dist < MAX_ATTACK_DISTANCE:
-                state.dbg_text(s.unit, ', '.join([str(l) for l in GetLanes(s.unit)]))
-                if state.my_state.lane in GetLanes(s.unit):
-                    enemies.append(s)
-        if state.my_state.hp - state.my_state.unit.max_life * 0.8 < state.my_state.aggro:
+        if state.my_state.hp - state.my_state.unit.max_life * 0.63 < state.my_state.aggro:
             res = 0 # FLEE
-        elif enemies:
-            u = PickTarget(state.my_state.me, ActionType.MAGIC_MISSILE, state,
-                           radius=MAX_ATTACK_DISTANCE)
-            if u:
-                e_ids = [e.unit.id for e in enemies[:MAX_TARGETS_NUM]]
-                idx = e_ids.index(u.id) if u.id in e_ids else 0
-            else:
-                idx = 0
-            res = 2 + idx   # ATTACK
         else:
-            res = 1 # ADVANCE
-        # print res
+            u = PickTarget(state.my_state.me, ActionType.MAGIC_MISSILE, state,
+                           radius=MAX_ATTACK_DISTANCE, lane=state.my_state.lane)
+            if u:
+                e_ids = [e.unit.id for e in state.enemy_states[:MAX_TARGETS_NUM]]
+                idx = e_ids.index(u.id) if u.id in e_ids else 0
+                res = 2 + idx   # ATTACK
+            else:
+                res = 1 # ADVANCE
         return res
 
     def Stop(self):
@@ -200,7 +191,7 @@ class RemotePolicy(object):
             evts = poller.poll(1000)
             if evts:
                 self.q = QFunction(evts[0][0].recv_pyobj())
-                # print 'Recieved coeff'
+                print 'Recieved coeff'
         print 'Exitting...'
 
     def Act(self, state):
@@ -209,21 +200,6 @@ class RemotePolicy(object):
 
         if np.random.rand() < epsilon or self.q is None:
             return np.random.randint(0, self.max_actions)
-
-        if False:
-            values = self.q.Q(state.to_numpy())
-            res = np.argmax(values)
-            debug = []
-            for i, (act, v) in enumerate(zip(self.actions_debug, values)):
-                act = act.rjust(8)
-                if i == res:
-                    act = '*' + act
-                else:
-                    act = ' ' + act
-                v = ('%.2f' % v).rjust(7)
-                debug.append('%s:%s' % (act, v))
-            print ' '.join(debug)
-            return res
 
         res, val = self.q.Select(state)
         # action = (['FLEE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
@@ -243,8 +219,6 @@ Q_N_STEPS = 20
 
 
 def GetLane(me):
-    return np.random.choice(LANES)
-    return LaneType.BOTTOM
     if me.master:
         return LaneType.MIDDLE
     messages = me.messages
@@ -350,10 +324,10 @@ class MyStrategy:
                 self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 
         if self.flee_action is None:
-#            if zmq and (len(sys.argv) > 3):
-#                self.lane = int(sys.argv[3])
-#            else:
-            self.lane = np.random.choice(LANES)
+            if zmq and (len(sys.argv) > 3):
+                self.lane = int(sys.argv[3])
+            else:
+                self.lane = np.random.choice(LANES)
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 
@@ -374,8 +348,8 @@ class MyStrategy:
             gamma = GAMMA ** (world.tick_index - self.last_tick)
             self.num_deaths += 1
 
-        if reward != 0:
-            print 'REWARD: %.1f' % reward
+        # if reward != 0:
+        #     print 'REWARD: %.1f' % reward
 
         if self.initialized:
             self.SaveExperience(self.last_state, self.last_action, reward, state, gamma)
