@@ -1,6 +1,8 @@
 import random
+import time
 
 import numpy as np
+import tensorflow as tf
 
 
 class ExperienceBuffer(object):
@@ -139,7 +141,121 @@ class WeightedExperienceBuffer(object):
         max_w = (self.weight_min[1] / self.weight_sums[1]) ** -self.beta
         w = (self.weight_sums[self.index_in_tree(indexes)] / self.weight_sums[1]) ** -self.beta
 
-        return (indexes, 
-                np.transpose(self.ss[:,indexes]), self.aa[indexes], self.rr[indexes],
+        return (indexes,
+                np.transpose(self.ss[:, indexes]), self.aa[indexes], self.rr[indexes],
                 np.transpose(self.ss1[:, indexes]), self.gg[indexes],
                 w / max_w)
+
+
+def HuberLoss(tensor, boundary):
+    abs_x = tf.abs(tensor)
+    delta = boundary
+    quad = tf.minimum(abs_x, delta)
+    lin = (abs_x - quad)
+    return 0.5 * quad**2 + delta * lin
+
+DEFAULT_OPTIONS = {
+    'clip_grad': 3.,
+    'learning_rate': 0.0001,
+}
+
+class SupervisedPolicyValue(object):
+    """Class to learn policy and value function on EXISTING policy"""
+    def __init__(self, build_networks, buf, options=DEFAULT_OPTIONS):
+        self._options = options
+        self.exp_buffer = buf
+        with tf.device('/cpu:0'):
+            self.state = tf.placeholder(tf.float32, shape=[None, self.exp_buffer.state_size],
+                                        name='state')
+            self.action = tf.placeholder(tf.int32, shape=[None], name='action')
+            self.reward = tf.placeholder(tf.float32, shape=[None], name='reward')
+            self.state1 = tf.placeholder(tf.float32, shape=[None, self.exp_buffer.state_size],
+                                         name='state1')
+            self.gamma = tf.placeholder(tf.float32, shape=[None], name='gamma')
+            self.is_weights = tf.placeholder(tf.float32, shape=[None], name='is_weights')
+            self.is_training = tf.placeholder(tf.bool, shape=None, name='is_training')
+
+            self.logits, self.baseline = build_networks(self.state,
+                                                        is_training=self.is_training, reuse=False)
+            _, self.baseline1 = build_networks(self.state1, is_training=False, reuse=True)
+            self.tf_policy = tf.reshape(tf.multinomial(self.logits, 1), [])
+
+            # Experimental
+            self.rolled_baseline = tf.stop_gradient(self.reward + self.gamma * self.baseline1)
+            self.advantage = self.rolled_baseline - self.baseline
+
+            self.cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(self.logits, self.action)
+            self.policy_loss = tf.reduce_mean(self.cross_entropy)
+            # For actor-critic this should look like:
+            # self.policy_loss = tf.reduce_mean(
+            #     tf.mul(self.cross_entropy, tf.stop_gradient(self.advantage)))
+
+            self.value_loss = 0.5 * tf.reduce_mean(HuberLoss(self.advantage, 5))
+
+            self.policy_entropy = tf.reduce_mean(-tf.nn.softmax(self.logits) * 
+                                                  tf.nn.log_softmax(self.logits))
+
+#             loss = self.value_loss
+            loss = self.policy_loss + 0.25 * self.value_loss - 0.01 * self.policy_entropy
+
+            self.optimizer = tf.train.AdamOptimizer(options['learning_rate'])
+            grads = self.optimizer.compute_gradients(loss, tf.get_collection(tf.GraphKeys.VARIABLES))
+            if 'clip_grad' in options:
+                grads = [(tf.clip_by_norm(g, options['clip_grad']) if g is not None else None, v)
+                         for g, v in grads]
+
+            for grad, var in grads:
+                tf.histogram_summary(var.name, var)
+                if grad is not None:
+                    tf.histogram_summary('{}/grad'.format(var.name), grad)            
+
+            self.global_step = tf.Variable(0, name='global_step', trainable=False)
+            self.train_op = self.optimizer.apply_gradients(grads, self.global_step)
+            
+            tf.histogram_summary("Predicted baseline", self.baseline)
+            tf.histogram_summary("TD error", self.advantage)
+            tf.scalar_summary("Loss/Actor", self.policy_loss)
+            tf.scalar_summary("Loss/Critic", self.value_loss)
+            tf.scalar_summary("Loss/Entropy", self.policy_entropy)
+            tf.scalar_summary("Loss/Total", loss)
+
+            self.summary_op = tf.merge_all_summaries()
+
+    def Init(self, sess, run_id):
+        sess.run(tf.initialize_all_variables())
+        self.writer = tf.train.SummaryWriter(
+            '/Users/vertix/tf/tensorflow_logs/aicup/%s'  % run_id
+#             '/media/vertix/UHDD/tmp/tensorflow_logs/aicup/%s' % run_id
+        )
+        self.saver = tf.train.Saver(tf.get_collection(tf.GraphKeys.VARIABLES))
+        self.last_start = time.time()
+        self.cur_step = 0
+        self.writer.add_graph(tf.get_default_graph())
+
+    def Step(self, sess, batch_size=32):
+        idx, ss, aa, rr, ss1, gg, ww = self.exp_buffer.sample(batch_size)
+        if ss is None:
+            return
+        
+        feed_dict = {self.state: ss, self.action: aa, self.reward: rr, self.state1:ss1,
+                     self.gamma: gg, self.is_weights: ww,
+                     self.is_training: True}
+
+        if self.cur_step and self.cur_step % 100 != 0:
+            self.cur_step, _ = sess.run(
+                [self.global_step, self.train_op], feed_dict)
+        else:
+            self.cur_step, _, smr = sess.run(
+                [self.global_step, self.train_op, self.summary_op], feed_dict)
+            self.writer.add_summary(smr, self.cur_step)
+
+        if self.cur_step % 20000 == 0:
+            self.saver.save(sess, 'ac', global_step=self.global_step)
+            if self.last_start is not None:
+                self.writer.add_summary(
+                    tf.Summary(
+                        value=[tf.Summary.Value(
+                            tag='Steps per sec',
+                            simple_value=20000 / (time.time() - self.last_start))]),
+                    self.cur_step)
+            self.last_start = time.time()

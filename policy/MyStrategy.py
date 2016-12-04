@@ -38,7 +38,8 @@ try:
 except:
     debug = None
 else:
-    debug = DebugClient()
+    pass
+    # debug = DebugClient()
 
 
 MAX_TARGETS_NUM = 5
@@ -59,7 +60,7 @@ def Softmax(state):
     state -= np.max(state)
     e = np.exp(state)
     return e / np.sum(e)
-        
+
 
 class QFunction(object):
     def __init__(self, network_vars):
@@ -100,6 +101,43 @@ class QFunction(object):
 MAX_ATTACK_DISTANCE = 1000
 
 
+class NNPolicy(object):
+    def __init__(self, network_vars):
+        self.vars = network_vars
+        self.actions = None
+
+    def Logits(self, state):
+        state = np.matmul(state, self.vars['common/hidden1/weights:0'])
+        state += self.vars['common/hidden1/biases:0']
+        state = ReLu(state)
+
+        state = np.matmul(state, self.vars['common/hidden2/weights:0'])
+        state += self.vars['common/hidden2/biases:0']
+        state = ReLu(state)
+
+        logits = np.matmul(state, self.vars['policy/policy/weights:0'])
+        logits += self.vars['policy/policy/biases:0']
+        return logits
+
+    def Softmax(self, state):
+        logits = self.Logits(state)
+        return Softmax(logits)
+
+    def Sample(self, state):
+        sm = self.Softmax(state)
+        if self.actions is None:
+            self.actions = range(len(sm))
+        return np.random.choice(self.actions, p=sm)
+
+    def Act(self, state):
+        a = self.Sample(state.to_numpy())
+        print a
+        return a
+
+    def Stop(self):
+    	pass
+
+
 class DefaultPolicy(object):
     def Act(self, state):
         enemies = []
@@ -125,7 +163,7 @@ class DefaultPolicy(object):
         return res
 
     def Stop(self):
-    	pass
+        pass
 
 
 class RemotePolicy(object):
@@ -229,6 +267,8 @@ class MyStrategy:
             self.policy = RemotePolicy(sys.argv[2], NUM_ACTIONS)
         else:
             self.policy = DefaultPolicy()
+            # with open('network') as f:
+            #     self.policy = NNPolicy(cPickle.load(f))
 
         self.last_score = 0.
         self.initialized = False
@@ -302,14 +342,13 @@ class MyStrategy:
             debug.post()
             debug.start()
         HistoricStateTracker.GetInstance(me, world).AddInvisibleBuildings(me, world, game)
-        # print world.tick_index
         if world.tick_index < 10:
             l = GetLane(me)
             if l is not None:
                 self.lane = l
                 self.flee_action = Actions.FleeAction(game.map_size, self.lane)
                 self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
-                
+
         if self.flee_action is None:
 #            if zmq and (len(sys.argv) > 3):
 #                self.lane = int(sys.argv[3])
