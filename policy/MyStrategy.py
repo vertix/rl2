@@ -102,26 +102,17 @@ MAX_ATTACK_DISTANCE = 1000
 
 class DefaultPolicy(object):
     def Act(self, state):
-        enemies = []
-        for s in state.enemy_states:
-            if s.dist < MAX_ATTACK_DISTANCE:
-                state.dbg_text(s.unit, ', '.join([str(l) for l in GetLanes(s.unit)]))
-                if state.my_state.lane in GetLanes(s.unit):
-                    enemies.append(s)
         if state.my_state.hp - state.my_state.unit.max_life * 0.63 < state.my_state.aggro:
             res = 0 # FLEE
-        elif enemies:
-            u = PickTarget(state.my_state.me, ActionType.MAGIC_MISSILE, state,
-                           radius=MAX_ATTACK_DISTANCE)
-            if u:
-                e_ids = [e.unit.id for e in enemies[:MAX_TARGETS_NUM]]
-                idx = e_ids.index(u.id) if u.id in e_ids else 0
-            else:
-                idx = 0
-            res = 2 + idx   # ATTACK
         else:
-            res = 1 # ADVANCE
-        # print res
+            u = PickTarget(state.my_state.me, ActionType.MAGIC_MISSILE, state,
+                           radius=MAX_ATTACK_DISTANCE, lane=state.my_state.lane)
+            if u:
+                e_ids = [e.unit.id for e in state.enemy_states[:MAX_TARGETS_NUM]]
+                idx = e_ids.index(u.id) if u.id in e_ids else 0
+                res = 2 + idx   # ATTACK
+            else:
+                res = 1 # ADVANCE
         return res
 
     def Stop(self):

@@ -225,6 +225,9 @@ class LivingUnitState(State):
                               game.burning_duration_ticks *
                               game.burning_summary_damage)
 
+    def get_effective_damage_to_me(self, nominal_damage):
+        return nominal_damage
+                              
     @property
     def hp(self):
         return self.unit.life
