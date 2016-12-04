@@ -79,8 +79,8 @@ def ClosestUnit(x, units):
     a = None
     xp = Point.FromUnit(x)
     for u in units:
-        if u.id == -21:
-            import pdb; pdb.set_trace()
+        # if u.id == -21:
+        #     import pdb; pdb.set_trace()
         d = xp.GetSqDistanceTo(u)
         if res > d:
             res = d
@@ -224,8 +224,8 @@ def GetAggro(me, safe_distance, state):
     #TODO(vyakunin): add aggro from respawn
     for e in state.world.wizards + state.world.minions + state.world.buildings:
         if (e.faction != me.faction):
-            if not (e.id in state.index):
-                import pdb; pdb.set_trace()
+            # if not (e.id in state.index):
+            #     import pdb; pdb.set_trace()
             es = state.index[e.id]
             d = es.dist
             deepness = (es.aggro_range + safe_distance + es.max_speed - d)
