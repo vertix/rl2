@@ -43,6 +43,10 @@ class NoOpAction(object):
     def Act(self, me, state):
         return Move()
 
+    @property
+    def name(self):
+        return "NOOP"
+
 
 def GetNextWaypoint(waypoints, me):
     # import pdb; pdb.set_trace()
@@ -65,6 +69,7 @@ def GetPrevWaypoint(waypoints, me):
         if point.GetDistanceTo(first_point) < me.get_distance_to_unit(first_point):
             return i
     return 0
+
 
 class MoveAction(object):
     def __init__(self, map_size, lane):
@@ -112,8 +117,8 @@ class MoveAction(object):
             divisor = max(divisor, abs(move.strafe_speed / mes.strafe_speed))
         move.speed /= divisor
         move.strafe_speed /= divisor
-        if abs(move.speed) > mes.forward_speed:
-            import pdb; pdb.set_trace()
+        # if abs(move.speed) > mes.forward_speed:
+        #     import pdb; pdb.set_trace()
         state.dbg_text(me, 'd:%.0f\ns:%.1f\nss:%.1f\nx:%.0f\ny:%.0f\nangle:%.1frel_angle:%.1f' % (
             d, move.speed, move.strafe_speed, me.x, me.y, me.angle, angle))
         new_p = Point(move.speed, move.strafe_speed).Rotate(me.angle) + me
@@ -216,8 +221,8 @@ class MoveAction(object):
         
 
     def RushToTarget(self, me, target, move, state):
-        if target.x > 3800 and target.y < 1400 and hasattr(target, 'id') and target.id < 0:
-            import pdb; pdb.set_trace()
+        # if target.x > 3800 and target.y < 1400 and hasattr(target, 'id') and target.id < 0:
+        #     import pdb; pdb.set_trace()
         mes = state.index[me.id]
         angle = None
         d = min(me.get_distance_to_unit(target), mes.max_speed)
@@ -359,6 +364,10 @@ class FleeAction(MoveAction):
         self.safe_distance = safe_distance
         self.opt_range_allowance = opt_range_allowance
 
+    @property
+    def name(self):
+        return "FLEE"
+
     def Act(self, me, state):
         move = Move()
         self.dodging = self.MaybeDodge(move, state)
@@ -389,6 +398,10 @@ class AdvanceAction(MoveAction):
     def __init__(self, map_size, lane):
         MoveAction.__init__(self, map_size, lane)
 
+    @property
+    def name(self):
+        return "ADVANCE"
+
     def Act(self, me, state):
         move = Move()
         self.dodging = self.MaybeDodge(move, state)
@@ -406,6 +419,10 @@ class RangedAttack(MoveAction):
         self.target = target
         self.opt_range_allowance = opt_range_allowance
 
+    @property
+    def name(self):
+        return "RANGE ATTACK %d" % self.target.id
+
     def Act(self, me, state):
         move = Move()
         self.dodging = self.MaybeDodge(move, state)
@@ -417,9 +434,10 @@ class RangedAttack(MoveAction):
             if not self.dodging:
                 self.MakeFleeMove(me, move, state)
         self.MakeMissileMove(me, move, state, self.target)
-        self.MaybeSetLanes(me, move)        
-        self.MaybeLearnSkills(me, move)  
+        self.MaybeSetLanes(me, move)
+        self.MaybeLearnSkills(me, move)
         return move
+
 
 class MeleeAttack(MoveAction):
     def __init__(self, map_size, lane, target, opt_range_allowance = 40):
@@ -427,9 +445,13 @@ class MeleeAttack(MoveAction):
         self.target = target
         self.opt_range_allowance = opt_range_allowance
 
+    @property
+    def name(self):
+        return "MELEE ATTACK %d" % self.target.id
+
     def Act(self, me, state):
-        if self.target.id == -21:
-            import pdb; pdb.set_trace()
+        # if self.target.id == -21:
+        #     import pdb; pdb.set_trace()
         move = Move()
         self.dodging = self.MaybeDodge(move, state)
         closest_target = GetClosestTarget(me, state)
@@ -437,7 +459,7 @@ class MeleeAttack(MoveAction):
         if closest_target is not None:
             d = me.get_distance_to_unit(closest_target)
         if (not TargetInRangeWithAllowance(me, self.target, self.opt_range_allowance, state) or
-            (isinstance(self.target, Wizard) and 
+            (isinstance(self.target, Wizard) and
              (not CanHitWizard(me, self.target, ActionType.MAGIC_MISSILE, state)))):
             if not self.dodging:
                 self.RushToTarget(me, self.target, move, state)

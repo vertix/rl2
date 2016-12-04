@@ -130,9 +130,7 @@ class NNPolicy(object):
         return np.random.choice(self.actions, p=sm)
 
     def Act(self, state):
-        a = self.Sample(state.to_numpy())
-        print a
-        return a
+        return self.Sample(state.to_numpy())
 
     def Stop(self):
     	pass
@@ -201,14 +199,7 @@ class RemotePolicy(object):
         if np.random.rand() < epsilon or self.q is None:
             return np.random.randint(0, self.max_actions)
 
-        res, val = self.q.Select(state)
-        # action = (['FLEE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
-        #           ['ADVANCE_%s' % ln for ln in ['TOP', 'MIDDLE', 'BOTTOM']] +
-        #           ['ATTACK_%d' %i for i in range(1, MAX_TARGETS_NUM + 1)])[res]
-        action = self.actions_debug[res]
-        if action != self.last_action:
-            self.last_action = action
-            print '%s: %.2f' % (action, val)
+        res, _ = self.q.Select(state)
         return res
 
 
@@ -218,31 +209,24 @@ GAMMA = 0.995
 Q_N_STEPS = 20
 
 
-def GetLane(me):
-    if me.master:
-        return LaneType.MIDDLE
-    messages = me.messages
-    for m in reversed(messages):
-        if m.lane is not None:
-            return m.lane
-    return None
-
-
 class MyStrategy:
-    def __init__(self):
-        if zmq and len(sys.argv) > 1:
+    def __init__(self, args=None):
+        self.args = args
+        if zmq and args and args.exp_socket:
             self.sock = zmq.Context().socket(zmq.REQ)
-            self.sock.connect(sys.argv[1])
-            print 'Connected to %s' % sys.argv[1]
+            addr = 'tcp://127.0.0.1:%d' % args.exp_socket
+            self.sock.connect(addr)
+            print 'Connected to %s' % addr
         else:
             self.sock = None
 
-        if len(sys.argv) > 2 and sys.argv[2] and sys.argv[2] != '0' and zmq:
-            self.policy = RemotePolicy(sys.argv[2], NUM_ACTIONS)
+        if args and args.policy == 'q' and args.q_socket:
+            self.policy = RemotePolicy('tcp://127.0.0.1:%d' % args.q_socket, NUM_ACTIONS)
+        elif args and args.policy == 'nn':
+            with open('network') as f:
+                self.policy = NNPolicy(cPickle.load(f))
         else:
             self.policy = DefaultPolicy()
-            # with open('network') as f:
-            #     self.policy = NNPolicy(cPickle.load(f))
 
         self.last_score = 0.
         self.initialized = False
@@ -255,6 +239,18 @@ class MyStrategy:
         self.next_file_index = 0
         self.flee_action = None
         self.advance_action = None
+
+    def GetLane(self, me):
+        if self.args and self.args.random_lane:
+            return random.choice(LANES)
+
+        if me.master:
+            return LaneType.MIDDLE
+        messages = me.messages
+        for m in reversed(messages):
+            if m.lane is not None:
+                return m.lane
+        return None
 
     def stop(self, final_score=None):
         r = 0.
@@ -317,17 +313,14 @@ class MyStrategy:
             debug.start()
         HistoricStateTracker.GetInstance(me, world).AddInvisibleBuildings(me, world, game)
         if world.tick_index < 10:
-            l = GetLane(me)
+            l = self.GetLane(me)
             if l is not None:
                 self.lane = l
                 self.flee_action = Actions.FleeAction(game.map_size, self.lane)
                 self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 
         if self.flee_action is None:
-            if zmq and (len(sys.argv) > 3):
-                self.lane = int(sys.argv[3])
-            else:
-                self.lane = np.random.choice(LANES)
+            self.lane = np.random.choice(LANES)
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 
@@ -342,14 +335,17 @@ class MyStrategy:
                    [noop] * (MAX_TARGETS_NUM - len(targets)))
 
         a = self.policy.Act(state)
+        if self.args and self.args.verbose and a != self.last_action:
+            print actions[a].name
+
         reward = world.get_my_player().score - self.last_score
         gamma = GAMMA
         if self.last_tick and world.tick_index - self.last_tick > 1:
             gamma = GAMMA ** (world.tick_index - self.last_tick)
             self.num_deaths += 1
 
-        # if reward != 0:
-        #     print 'REWARD: %.1f' % reward
+        if self.args and self.args.verbose and reward != 0:
+            print 'REWARD: %.0f' % reward
 
         if self.initialized:
             self.SaveExperience(self.last_state, self.last_action, reward, state, gamma)
