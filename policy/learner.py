@@ -54,7 +54,7 @@ class ExperienceBuffer(object):
 
 
 class WeightedExperienceBuffer(object):
-    def __init__(self, alpha, beta, max_weight, buffer_size=1 << 16):
+    def __init__(self, alpha, beta, max_weight, buffer_size=1<<16):
         self.ss, self.aa, self.rr, self.ss1, self.gg = None, None, None, None, None
         self.buffer_size = buffer_size
         self.inserted = 0
@@ -89,27 +89,27 @@ class WeightedExperienceBuffer(object):
     def add(self, s, a, r, s1, gamma, weight):
         if self.ss is None:
             # Initialize
-            state_size = len(s)
+            state_size = s.shape[1]
             self.ss = np.zeros((state_size, self.buffer_size))
             self.aa = np.zeros(self.buffer_size, dtype=np.int16)
             self.ss1 = np.zeros((state_size, self.buffer_size))
             self.rr = np.zeros(self.buffer_size)
             self.gg = np.zeros(self.buffer_size)
 
-        cur_index = self.inserted % self.buffer_size
-        self.ss[:, cur_index] = s
-        self.aa[cur_index] = a
-        self.rr[cur_index] = r
-        if s1 is not None:
-            self.ss1[:, cur_index] = s1
-            self.gg[cur_index] = gamma
-        else:
-            self.ss1[:, cur_index] = s
-            self.gg[cur_index] = 0.
+        indexes = []
+        for _ in a:
+            cur_index = self.inserted % self.buffer_size
+            self.inserted += 1
+            indexes.append(cur_index)
 
-        self.inserted += 1
+        self.ss[:, indexes] = s.transpose()
+        self.aa[indexes] = a
+        self.rr[indexes] = r
+        self.ss1[:, indexes] = s1.transpose()
+        self.gg[indexes] = gamma
 
-        self.tree_update(cur_index, weight)
+        for idx in indexes:
+            self.tree_update(idx, weight)
 
     @property
     def state_size(self):
