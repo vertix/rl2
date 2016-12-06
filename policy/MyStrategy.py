@@ -77,18 +77,18 @@ class QFunction(object):
         # state = BatchNorm(state, self.vars, 'model/hidden2/BatchNorm')
         state = ReLu(state)
 
-        value = np.matmul(state, self.vars['model/val_hid/weights:0'])
-        value += self.vars['model/val_hid/biases:0']
+        # value = np.matmul(state, self.vars['model/val_hid/weights:0'])
+        # value += self.vars['model/val_hid/biases:0']
         # value = BatchNorm(value, self.vars, 'model/val_hid/BatchNorm')
-        value = ReLu(value)
-        value = np.matmul(value, self.vars['model/value/weights:0'])
+        # value = ReLu(value)
+        value = np.matmul(state, self.vars['model/value/weights:0'])
         value += self.vars['model/value/biases:0']
 
-        adv = np.matmul(state, self.vars['model/adv_hid/weights:0'])
-        adv += self.vars['model/adv_hid/biases:0']
+        # adv = np.matmul(state, self.vars['model/adv_hid/weights:0'])
+        # adv += self.vars['model/adv_hid/biases:0']
         # adv = BatchNorm(adv, self.vars, 'model/adv_hid/BatchNorm')
-        adv = ReLu(adv)
-        adv = np.matmul(adv, self.vars['model/advantage/weights:0'])
+        # adv = ReLu(adv)
+        adv = np.matmul(state, self.vars['model/advantage/weights:0'])
         adv += self.vars['model/advantage/biases:0']
 
         return value + (adv - adv.mean())
