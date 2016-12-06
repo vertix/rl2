@@ -295,6 +295,16 @@ class MyStrategy:
         })
 
         if s1 is None or len(self.exps) >= Q_N_STEPS:
+            if self.args and self.args.n_step:
+                rew = 0.
+                g = 1.
+                for exp in reversed(self.exps):
+                    rew += exp['r'] + exp['g'] * rew
+                    g *= exp['g']
+                    exp['s1'] = s1
+                    exp['r'] = rew
+                    exp['g'] = g
+
             s = np.array([e['s'] for e in self.exps])
             a = np.array([e['a'] for e in self.exps], dtype=np.int32)
             r = np.array([e['r'] for e in self.exps])
@@ -307,16 +317,6 @@ class MyStrategy:
             if self.sock.recv() != "Ok":
                 print "Error when sending experience"
             self.exps = []
-
-            # rew = 0.
-            # g = 1.
-            # for exp in reversed(self.exps):
-                # if False:
-                #     rew += exp['r'] + exp['g'] * rew
-                #     g *= exp['g']
-                #     exp['s1'] = s1
-                #     exp['r'] = rew
-                #     exp['g'] = g
 
     def move(self, me, world, game, move):
         """
