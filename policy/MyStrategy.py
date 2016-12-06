@@ -299,7 +299,7 @@ class MyStrategy:
                 rew = 0.
                 g = 1.
                 for exp in reversed(self.exps):
-                    rew += exp['r'] + exp['g'] * rew
+                    rew = exp['r'] + exp['g'] * rew
                     g *= exp['g']
                     exp['s1'] = s1
                     exp['r'] = rew
