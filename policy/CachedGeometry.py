@@ -2,9 +2,11 @@ from Geometry import BuildPath
 from heapq import heappush
 from heapq import heappop
 
+CACHE_TTL=30
+
 class Cache(object):
     instance = None
-    def __init__(self, ttl=20):
+    def __init__(self, ttl=CACHE_TTL):
         self.paths = {}
         self.times_and_keys = []
         self.ttl = ttl

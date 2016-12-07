@@ -19,6 +19,7 @@ from model.World import World
 
 from Analysis import PickTarget
 from Analysis import HistoricStateTracker
+from Analysis import PickBestFireballTarget
 
 from Geometry import GetLanes
 
@@ -39,7 +40,7 @@ except:
     debug = None
 else:
     pass
-    # debug = DebugClient()
+    debug = DebugClient()
 
 
 MAX_TARGETS_NUM = 5
@@ -138,15 +139,25 @@ class NNPolicy(object):
 
 class DefaultPolicy(object):
     def Act(self, state):
-        if state.my_state.hp - state.my_state.unit.max_life * 0.63 < state.my_state.aggro:
+        mes = state.my_state
+        me = mes.unit
+        state.dbg_text(me, mes.fireball_cooldown)
+        if (mes.hp -
+            mes.max_hp * 0.63 -
+            mes.expected_overtime_damage < mes.aggro):
             res = 0 # FLEE
         else:
-            u = PickTarget(state.my_state.me, ActionType.MAGIC_MISSILE, state,
-                           radius=MAX_ATTACK_DISTANCE, lane=state.my_state.lane)
+            target_and_damage = PickBestFireballTarget(me, state)
+            if (target_and_damage is not None) and ((mes.mana > 0.8 * mes.max_mana) or (
+                target_and_damage.CombinedDamage(state) >= mes.fireball * 1.5)):
+                mes.fireball_target = target_and_damage.target
+                return 2 # FIREBALL
+            u = PickTarget(me, ActionType.MAGIC_MISSILE, state,
+                           radius=MAX_ATTACK_DISTANCE, lane=mes.lane)
             if u:
                 e_ids = [e.unit.id for e in state.enemy_states[:MAX_TARGETS_NUM]]
                 idx = e_ids.index(u.id) if u.id in e_ids else 0
-                res = 2 + idx   # ATTACK
+                res = 3 + idx   # ATTACK
             else:
                 res = 1 # ADVANCE
         return res
@@ -239,6 +250,7 @@ class MyStrategy:
         self.next_file_index = 0
         self.flee_action = None
         self.advance_action = None
+        self.fireball_action = None
 
     def GetLane(self, me):
         if self.args and self.args.random_lane:
@@ -318,11 +330,13 @@ class MyStrategy:
                 self.lane = l
                 self.flee_action = Actions.FleeAction(game.map_size, self.lane)
                 self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
+                self.fireball_action = Actions.FireballAction(game.map_size, self.lane)
 
         if self.flee_action is None:
             self.lane = np.random.choice(LANES)
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
+            self.fireball_action = Actions.FireballAction(game.map_size, self.lane)
 
         state = None
         state = State.WorldState(me, world, game, self.lane, self.last_state, debug)
@@ -330,7 +344,7 @@ class MyStrategy:
 
         targets = [enemy.unit for enemy in state.enemy_states
                    if enemy.dist < 1000][:MAX_TARGETS_NUM]
-        actions = ([self.flee_action, self.advance_action] +
+        actions = ([self.flee_action, self.advance_action, self.fireball_action] +
                    [Actions.MeleeAttack(game.map_size, self.lane, t) for t in targets] +
                    [noop] * (MAX_TARGETS_NUM - len(targets)))
 

@@ -20,7 +20,7 @@ from Colors import GREEN
 
 EPSILON = 1E-4
 MACRO_EPSILON = 2
-MAX_OBSTACLES = 10
+MAX_OBSTACLES = 8
 MAX_TREES = 3
 INFINITY = 1e6
 TICKS_TO_ACCOUNT_FOR = 10
@@ -163,6 +163,14 @@ class Line(object):
     
     def Normal(self):
         return Point(self.a, self.b) * (1.0 / sqrt(self.sq_norm))
+    
+    def IntersectWithCircle(self, c):
+        # Ax + By + C = 0
+        # (x - c.x) ^ 2 + (y - c.y) ^ 2 = c.r ^ 2
+        if c.p.GetDistanceToLine(self) > c.radius - EPSILON:
+            return []
+        a = acos(c.p.GetDistanceToLine(self) / c.radius)
+        return [self.Normal().Rotate(a) * c.radius + c, self.Normal().Rotate(-a) * c.radius + c]
         
     def __str__(self):
         return '(%.6f*x + %.6f*y + %.6f = 0)' % (self.a, self.b, self.c)
@@ -336,7 +344,6 @@ def SegmentClearFromHardObstacles(s, obstacles, soft_obstacles, state):
         if SegmentCrossesCircle(s, o):
             if o.is_tree:
                 obs.append((o.id, o))
-                state.dbg_text(o, o.id, RED)
             else:
                 return False
     obs.sort(key=lambda x: s.p1.GetSqDistanceTo(x[1]))
@@ -367,6 +374,28 @@ def IntersectCircles(c1, c2):
         
     return ([p1, p2], [((p1 - c1p).GetAngle(), (p2 - c1p).GetAngle()), 
                        ((p1 - c2p).GetAngle(), (p2 - c2p).GetAngle())])
+
+def IntersectSegments(s1, s2):
+    if s1.l.sq_norm < EPSILON:
+        return None
+    if s2.l.sq_norm < EPSILON:
+        return None
+    # A1x + B1y + C1 = 0
+    # A2x + B2y + C2 = 0
+    # d = A1B2 - A2B1
+    # x = (-C1 * B2 + C2 * B1) / d
+    # y = (A1 * -C2 + A2 * C1) / d
+    d = s1.l.a * s2.l.b - s2.l.a * s1.l.b
+    if abs(d) < EPSILON:
+        return None
+    ans = Point((s2.l.c * s1.l.b - s1.l.c * s2.l.b) / d,
+                (s1.l.c * s2.l.a - s2.l.c * s1.l.a) / d)
+    if ((s1.p2 - s1.p1).ScalarMul(ans - s1.p1) > EPSILON and
+        (s1.p1 - s1.p2).ScalarMul(ans - s1.p2) > EPSILON and
+        (s2.p2 - s2.p1).ScalarMul(ans - s2.p1) > EPSILON and
+        (s2.p1 - s2.p2).ScalarMul(ans - s2.p2) > EPSILON):
+        return ans
+    return None
                        
 # a1, a2 - starting and ending angles for arc, i1 and i2 - corresponding point numbers,
 # returns [(-pi <= alpha < pi, type, point_no)...],
@@ -558,11 +587,6 @@ def FindOptimalPaths(me, units, state):
         # leave just list of point numbers
         points_per_unit[unit_index] = [k for _, __, k in p if k != -1]
     
-    for p_id, edges in enumerate(graph):
-        for e in edges:
-            state.dbg_line(points[p_id], points[e.v], RED if e.type == Edge.ARC else GREEN)
-                
-        
     optimal_distances, prev = Dijkstra(graph)
     return (points, prev, optimal_distances, points_per_unit)
     

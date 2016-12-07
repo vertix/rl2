@@ -26,10 +26,12 @@ from Geometry import GetLanes
 from Geometry import Point
 from Geometry import Line
 from Geometry import Segment
+from Geometry import PlainCircle
 
 from copy import deepcopy
 
 from Colors import BLACK
+from Colors import GREEN
 
 MACRO_EPSILON=1.0
 
@@ -99,7 +101,7 @@ class ProjectileState(State):
         self.p = self.unit = p
         self.dots = 0.0
         self.game = game
-        if p.id in last_state.index:
+        if p.id >= 0 and (p.id in last_state.index):
             old_p = last_state.index[p.id]
             self.min_damage = old_p.min_damage
             self.max_damage = old_p.max_damage
@@ -140,9 +142,19 @@ class ProjectileState(State):
         start_point = Point.FromUnit(owner.unit)
         self.expected_end = start_point + speed * cast_range
         for t in world.trees:
-            d = Point.FromUnit(t).GetSqDistanceToSegment(Segment(start_point, self.expected_end))
-            if d < (t.radius + self.min_radius) * (t.radius + self.min_radius):
-                self.expected_end = start_point + speed * (math.sqrt(d) - t.radius - self.min_radius)
+            tp = Point.FromUnit(t)
+            ray = Segment(self.start, self.expected_end)
+            d = tp.GetSqDistanceToSegment(ray)
+            if d < (t.radius + self.min_radius) * (t.radius + self.min_radius) - MACRO_EPSILON:
+                pc = PlainCircle(tp, t.radius + self.min_radius)
+                # intersect segment ray with pc, pick closest to start
+                intersections = ray.l.IntersectWithCircle(pc)
+                dists = [i.GetSqDistanceTo(self.start) for i in intersections]
+                if dists[0] < dists[1]:
+                    self.expected_end = intersections[0]
+                else:
+                    self.expected_end = intersections[1]
+                self.dbg_line(start_point, self.expected_end, GREEN)
         self.center_line = Line(self.expected_end, start_point)
         shift = self.center_line.Normal() * (self.max_radius + me.radius + MACRO_EPSILON)
         self.border1 = Segment(
@@ -394,7 +406,7 @@ class WizardState(LivingUnitState):
             missile_radius = max(missile_radius, game.frost_bolt_radius)
         if self.has_fireball:
             missile_radius = max(missile_radius, game.fireball_explosion_min_damage_range)
-        self.effective_range = w.cast_range + missile_radius
+        self.effective_range = w.cast_range + missile_radius + me.radius
         self.hastened = StatusType.HASTENED in [st.type for st in w.statuses]
         
         self.handle_improvements(w, game, world)
@@ -414,7 +426,8 @@ class WizardState(LivingUnitState):
         shield_aura2 = False
         for ww in world.wizards:
             if ((ww.faction == w.faction) and 
-                (ww.get_distance_to_unit(w) < game.aura_skill_range)): 
+                (Point.FromUnit(ww).GetSqDistanceTo(w) < 
+                 game.aura_skill_range * game.aura_skill_range)): 
                 if SkillType.MOVEMENT_BONUS_FACTOR_AURA_1 in ww.skills:
                     haste_aura1 = True
                 if SkillType.MOVEMENT_BONUS_FACTOR_AURA_2 in ww.skills:
@@ -442,11 +455,9 @@ class WizardState(LivingUnitState):
             haste_factor += game.movement_bonus_factor_per_skill_level
         if haste_aura2:
             haste_factor += game.movement_bonus_factor_per_skill_level
-        self.max_effective_speed = (math.hypot(game.wizard_forward_speed, 
-                                          game.wizard_strafe_speed) * 
-                                    haste_factor)
         self.max_strafe_speed = game.wizard_strafe_speed * haste_factor
         self.max_forward_speed = game.wizard_forward_speed * haste_factor
+        self.max_effective_speed = self.max_forward_speed
         
         self.damage_factor = 1.0
         if StatusType.EMPOWERED in [st.type for st in w.statuses]:
@@ -484,7 +495,7 @@ class WizardState(LivingUnitState):
             self.absorption += game.magical_damage_absorption_per_skill_level
     
     def get_effective_damage_to_me(self, nominal_damage):
-        return max(0.0, nominal_damage - self.absorption) * (1.0 - self.absorption_factor) 
+        return max(0.0, nominal_damage * (1.0 - self.absorption_factor) - self.absorption)
 
     def get_effective_damage_by_me(self, nominal_damage):
         return (nominal_damage + self.m_damage_increase) * self.damage_factor
@@ -509,6 +520,13 @@ class WizardState(LivingUnitState):
     @property
     def max_speed(self):
         return self.max_effective_speed
+
+    @property
+    def max_rotation_speed(self):
+        speed = self.game.wizard_max_turn_angle
+        if StatusType.HASTENED in [st.type for st in self.unit.statuses]:
+            speed *= (1.0 + self.game.hastened_rotation_bonus_factor)
+        return speed
 
     @property
     def attack_range(self):
@@ -578,9 +596,12 @@ class WizardState(LivingUnitState):
 
     @property
     def fireball(self):
-        return (self.get_effective_damage_by_me(self.game.fireball_explosion_max_damage) +
-                self.game.burning_summary_damage
+        return (self.fireball_direct_damage + self.game.burning_summary_damage
                 if self.has_fireball else 0.0)
+        
+    @property
+    def fireball_direct_damage(self):
+        return self.get_effective_damage_by_me(self.game.fireball_explosion_max_damage)
         
     @property
     def fireball_cooldown(self):
@@ -695,6 +716,7 @@ class MyState(WizardState):
         self.lane = lane
         world_state.index[me.id] = self
         self.cached_aggro = GetAggro(me, 10, world_state)
+        self.fireball_target = None
         
     @property
     def aggro(self):

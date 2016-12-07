@@ -16,16 +16,152 @@ from model.LivingUnit import LivingUnit
 from Geometry import RangeAllowance
 from Geometry import GetLanes
 from Geometry import Point
+from Geometry import Segment
 from Geometry import PlainCircle
+from Geometry import IntersectCircles
+from Geometry import IntersectSegments
 from math import sqrt
 
 from Colors import RED
+from Colors import GREEN
+from Colors import BLUE
 
 CAST_RANGE_ERROR = 0
 EPSILON = 1e-4
 INFINITY = 1e6
 AGGRO_TICKS = 20
 MAX_RANGE = 1000
+MAX_TARGETS = 3
+
+class TargetAndDamage(object):
+    def __init__(self, target):
+        self.target = target
+        self.wizard_damage = 0.0
+        self.building_damage = 0.0
+        self.damage = 0.0
+
+    def AddWizardDamage(self, d):
+        self.wizard_damage += d
+
+    def AddBuildingDamage(self, d):
+        self.building_damage += d
+
+    def AddDamage(self, d):
+        self.damage += d
+
+    def CombinedDamage(self, state):
+        return (self.wizard_damage * (1 + state.game.wizard_damage_score_factor) +
+                   self.building_damage * (1 + state.game.building_damage_score_factor) +
+                   self.damage * (1 + state.game.minion_damage_score_factor))
+
+def GetFireballDamage(mes, t, p, state):
+    ws = None
+    if isinstance(t, Wizard):
+        ws = state.index[t.id]
+        d = p.GetDistanceTo(mes.unit)
+        time = d / state.game.fireball_speed
+        final_distance = p.GetDistanceTo(t) + time * ws.strafe_speed - t.radius
+    else:
+        final_distance = p.GetDistanceTo(t) - t.radius
+    if final_distance > state.game.fireball_explosion_min_damage_range:
+        return 0
+    if final_distance < state.game.fireball_explosion_max_damage_range:
+        direct_damage = mes.fireball_direct_damage
+    else:
+        direct_damage = state.game.fireball_explosion_min_damage + (
+            state.game.fireball_explosion_max_damage -
+            state.game.fireball_explosion_min_damage) * (
+            final_distance - state.game.fireball_explosion_max_damage_range) / (
+            state.game.fireball_explosion_min_damage_range -
+            state.game.fireball_explosion_max_damage_range)
+        direct_damage = mes.get_effective_damage_by_me(direct_damage)
+            
+    if isinstance(t, Wizard):
+        direct_damage = ws.get_effective_damage_to_me(direct_damage)
+        direct_damage += (state.game.wizard_elimination_score_factor * 
+                          (t.max_life - t.life + direct_damage + state.game.burning_summary_damage)
+                          + state.game.burning_summary_damage)
+    elif isinstance(t, Building):
+        direct_damage += (state.game.building_elimination_score_factor * 
+                          (t.max_life - t.life + direct_damage + state.game.burning_summary_damage)
+                          + state.game.burning_summary_damage)
+    else:
+        direct_damage = min(t.life, direct_damage + state.game.burning_summary_damage)
+    return direct_damage
+
+def PickBestFireballTarget(me, state):
+    mes = state.index[me.id]
+    if mes.fireball == 0 or mes.fireball_cooldown > 2:
+        return None
+    sorted_targets = [deepcopy(t) for t in sorted(BuildTargets(
+                       me, me.cast_range +
+                       state.game.fireball_explosion_min_damage_range +
+                       state.game.faction_base_radius, state), key=lambda x: (
+                        -3*isinstance(x, Wizard) - 2*isinstance(x, Building),
+                        -state.index[x.id].damage, -state.index[x.id].hp))]
+    targets = []
+    for t in sorted_targets:
+        t.radius += state.game.fireball_explosion_min_damage_range
+        targets.append(t)
+    candidates = []
+    segments = []
+    for i, t in enumerate(targets[:MAX_TARGETS]):
+        state.dbg_circle(t, RED)
+        candidates.append(Point.FromUnit(t))
+        for j in range(i+1, len(targets[:MAX_TARGETS])):
+            t2 = targets[j]
+            intersections = IntersectCircles(t, t2)
+            if intersections is not None:
+                p1 = intersections[0][0]
+                p2 = intersections[0][1]
+                candidates.append((p1 + p2) * 0.5)
+                if p1.GetSqDistanceTo(p2) > EPSILON:
+                    segments.append(Segment(p1, p2))
+    for i, s1 in enumerate(segments):
+        state.dbg_line(s1.p1, s1.p2, RED)
+        for j in range(i + 1, len(segments)):
+            s2 = segments[j]
+            intersection = IntersectSegments(s1, s2)
+            if intersection is not None:
+                candidates.append(intersection)
+    best = None
+    friend_wizards = [w for w in state.world.wizards if w.faction == me.faction]
+    for c in candidates:
+        d = c.GetDistanceTo(me)
+        if d > me.cast_range:
+            c = Point.FromUnit(me) + (c - me) * (me.cast_range / d)
+        state.dbg_circle(PlainCircle(c, 3), GREEN)
+        res = TargetAndDamage(c)
+        if d < state.game.fireball_explosion_min_damage_range + me.radius + mes.max_speed:
+            c = Point.FromUnit(me) + (c - me) * ((
+                state.game.fireball_explosion_min_damage_range + me.radius + mes.max_speed) / d)
+        for t in targets:
+            damage = GetFireballDamage(mes, t, c, state)
+            if damage > 0:
+                if isinstance(t, Wizard):
+                    res.AddWizardDamage(damage)
+                elif isinstance(t, Building):
+                    res.AddBuildingDamage(damage)
+                else:
+                    res.AddDamage(damage)
+        for f in friend_wizards:
+            damage = GetFireballDamage(mes, f, c, state)
+            if damage > 0:
+                if isinstance(t, Wizard):
+                    res.AddWizardDamage(-damage)
+                elif isinstance(t, Building):
+                    res.AddBuildingDamage(-damage)
+                else:
+                    res.AddDamage(-damage)
+        combined_damage = res.CombinedDamage(state)
+        state.dbg_text(c, '\n\n\n%d' % combined_damage)
+        if combined_damage > 0 and (best is None or (
+            combined_damage > 
+            best.CombinedDamage(state))):
+            best = res
+    if best is not None:
+        state.dbg_circle(PlainCircle(best.target, 5), BLUE)
+    return best
 
 def GetAggroFromDamage(damage, remaining_cooldown, cooldown, deepness):
     return (max(0, int(AGGRO_TICKS + deepness - remaining_cooldown + cooldown - 1)) /
@@ -34,28 +170,33 @@ def GetAggroFromDamage(damage, remaining_cooldown, cooldown, deepness):
 def GetUnitAggro(mes, us, deep_in_range, state):
     aggro = 0.0
     speed = mes.forward_speed
-    from State import WizardState
-    if isinstance(us, WizardState):
+    runaway_speed = max(1.0, speed - us.max_speed)
+    time_to_leave = deep_in_range / runaway_speed
+    if isinstance(us.unit, Wizard):
+        if (us.frost_bolt > 0 and us.frost_bolt_cooldown < time_to_leave):
+            time_to_leave += state.game.frozen_duration_ticks
+        
         aggro = GetAggroFromDamage(us.fireball,
                          us.fireball_cooldown,
                          us.fireball_total_cooldown,
-                         deep_in_range / max(1.0, speed - us.strafe_speed / 3.0))
+                         time_to_leave)
         aggro += GetAggroFromDamage(us.frost_bolt,
                          us.frost_bolt_cooldown,
                          us.frost_bolt_total_cooldown,
-                         deep_in_range / max(1.0, speed - us.strafe_speed / 3.0))
+                         time_to_leave)
         aggro += GetAggroFromDamage(us.missile,
                          us.missile_cooldown,
                          us.missile_total_cooldown,
-                         deep_in_range / max(1.0, speed - us.strafe_speed / 3.0))
+                         time_to_leave)
         if us.dist < state.game.staff_range:
             aggro += GetAggroFromDamage(us.staff,
                                         us.staff_cooldown,
-                                        state.game.staff_cooldown_ticks)
+                                        state.game.staff_cooldown_ticks,
+                                        time_to_leave)
     else:
         aggro = GetAggroFromDamage(us.damage, us.cooldown_ticks, 
                                    us.total_cooldown_ticks,
-                                   deep_in_range / max(1.0, (speed - us.max_speed)))
+                                   time_to_leave)
     # state.dbg_text(us.unit, 'a: %.1f' % aggro)
     return aggro
 
@@ -99,7 +240,7 @@ def BuildTargets(me, radius, state):
     return [t for t in BuildEnemies(me, radius, state) if IsValidTarget(me, t, state)]
 
 def CanDodge(w, ps, state):
-    debug_string = ''
+    # debug_string = ''
     psp = Point.FromUnit(ps.p)
     wp = Point.FromUnit(w)
     d = psp.GetDistanceTo(wp) - w.radius - ps.max_radius
@@ -126,23 +267,26 @@ def CanDodge(w, ps, state):
     # state.dbg_text(w, debug_string, RED)
     return min_d < time * state.index[w.id].max_speed
     
+def ActionToProjectileTypeAndRadius(a, state):
+    if a == ActionType.FIREBALL:
+        return (ProjectileType.FIREBALL, state.game.fireball_explosion_min_damage_range)
+    if a == ActionType.FROST_BOLT:
+        return (ProjectileType.FROST_BOLT, state.game.frost_bolt_radius)
+    return (ProjectileType.MAGIC_MISSILE, state.game.magic_missile_radius)
 
 def CanHitWizard(me, w, action, state, strict=False):
     if action == ActionType.STAFF:
         return True
     ws = state.index[w.id]
     mes = state.index[me.id]
-    t = ProjectileType.MAGIC_MISSILE
-    r = state.game.magic_missile_radius
-    if action == ActionType.FIREBALL:
-        t = ProjectileType.FIREBALL
-        r = state.game.fireball_explosion_min_damage_range
-    if action == ActionType.FROST_BOLT:
-        t = ProjectileType.FROST_BOLT
-        r = state.game.frost_bolt_radius
+    t, r = ActionToProjectileTypeAndRadius(action, state)
+    
     speed = Point.FromUnit(w) - Point.FromUnit(me)
     if strict:
-        speed = Point(1.0, 0.0).Rotate(me.angle)
+        da = me.get_angle_to_unit(w)
+        if abs(da) > mes.max_rotation_speed:
+            da = da / abs(da) * mes.max_rotation_speed
+            speed = Point(1.0, 0.0).Rotate(me.angle + da)
     fake_p = Projectile(id=-me.id, x=me.x, y=me.y, speed_x=speed.x, speed_y=speed.y,
         angle=speed.GetAngle(), faction=me.faction, radius=r, type=t, owner_unit_id=me.id,
         owner_player_id=me.owner_player_id)
@@ -231,14 +375,12 @@ def GetAggro(me, safe_distance, state):
             deepness = (es.aggro_range + safe_distance + es.max_speed - d)
             if deepness > 0:
                 aggro += GetUnitAggro(mes, es, deepness, state)
-    aggro = mes.get_effective_damage_to_me(aggro) + mes.expected_overtime_damage 
+    aggro = mes.get_effective_damage_to_me(aggro) 
     return aggro
     
 def HaveEnoughTimeToTurn(w, angle, target, state, action=ActionType.MAGIC_MISSILE):
     ws = state.index[w.id]
-    speed = state.game.wizard_max_turn_angle
-    if StatusType.HASTENED in [st.type for st in w.statuses]:
-        speed *= (1.0 + game.hastened_rotation_bonus_factor)
+    speed = ws.max_rotation_speed
     return (max((abs(angle) / speed) + 2, 
                 (-RangeAllowance(w, target, state)) / ws.strafe_speed) < 
             ws.remaining_action_cooldown(action))
@@ -294,10 +436,14 @@ class HistoricStateTracker(object):
                 0, self.last_fired[i] + fake_b.cooldown_ticks - world.tick_index)
             for a in world.wizards + world.minions + world.buildings:
                 if a.faction == me.faction:
-                    if a.get_distance_to_unit(fake_b) < a.vision_range:
+                    d = a.get_distance_to_unit(fake_b)
+                    if d < a.vision_range:
                         found = True
                         dead_b.append(i)
                         break
+                    if d <= fake_b.attack_range and fake_b.remaining_action_cooldown_ticks == 0:
+                        fake_b.remaining_action_cooldown_ticks = fake_b.cooldown_ticks - 1
+                        self.last_fired[i] = world.tick_index
             if not found:
                 new_b.append(fake_b)
         world.buildings.extend(new_b)
