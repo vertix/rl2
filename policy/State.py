@@ -753,6 +753,9 @@ class WorldState(State):
         if last_state is not None:
             last_state.last_state = None
             self.last_state = last_state
+            self.enemy_base_hp = self.last_state.enemy_base_hp
+        else:
+            self.enemy_base_hp = 1000
 
         self.world = world
         clean_world(me, world)
@@ -760,13 +763,18 @@ class WorldState(State):
         self.minion_targets = [list() for _ in xrange(3)]
         for f in [Faction.ACADEMY, Faction.RENEGADES, Faction.NEUTRAL]:
             self.minion_targets[f] = BuildMinionTargets(f, world)
-        
+
         self.tree_states = [TreeState(t, me, dbg) for t in world.trees]
         self.projectile_states = [ProjectileState(p, me, game, world, last_state, dbg) for p in world.projectiles]
 
         states = [WizardState(w, me, game, world, dbg) for w in world.wizards if w != me]
         states += [MinionState(m, me, game, world, self) for m in world.minions]
         states += [BuildingState(b, me, game, world, dbg) for b in world.buildings]
+
+        # TODO(vertix): Add to state
+        for b in world.buildings:
+            if b.type == BuildingType.FACTION_BASE and b.faction != me.faction:
+                self.enemy_base_hp = b.life
 
         states = sorted(states, key=lambda x: x.dist)
         self.index = {}

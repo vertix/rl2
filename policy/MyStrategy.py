@@ -78,18 +78,18 @@ class QFunction(object):
         # state = BatchNorm(state, self.vars, 'model/hidden2/BatchNorm')
         state = ReLu(state)
 
-        value = np.matmul(state, self.vars['model/val_hid/weights:0'])
-        value += self.vars['model/val_hid/biases:0']
+        # value = np.matmul(state, self.vars['model/val_hid/weights:0'])
+        # value += self.vars['model/val_hid/biases:0']
         # value = BatchNorm(value, self.vars, 'model/val_hid/BatchNorm')
-        value = ReLu(value)
-        value = np.matmul(value, self.vars['model/value/weights:0'])
+        # value = ReLu(value)
+        value = np.matmul(state, self.vars['model/value/weights:0'])
         value += self.vars['model/value/biases:0']
 
-        adv = np.matmul(state, self.vars['model/adv_hid/weights:0'])
-        adv += self.vars['model/adv_hid/biases:0']
+        # adv = np.matmul(state, self.vars['model/adv_hid/weights:0'])
+        # adv += self.vars['model/adv_hid/biases:0']
         # adv = BatchNorm(adv, self.vars, 'model/adv_hid/BatchNorm')
-        adv = ReLu(adv)
-        adv = np.matmul(adv, self.vars['model/advantage/weights:0'])
+        # adv = ReLu(adv)
+        adv = np.matmul(state, self.vars['model/advantage/weights:0'])
         adv += self.vars['model/advantage/biases:0']
 
         return value + (adv - adv.mean())
@@ -102,10 +102,41 @@ class QFunction(object):
 MAX_ATTACK_DISTANCE = 1000
 
 
+class VarsListener(object):
+    def __init__(self, address, setter):
+        self.setter = setter
+
+        self.sock = zmq.Context().socket(zmq.SUB)
+        self.sock.setsockopt(zmq.SUBSCRIBE, "")
+        self.sock.connect(address)
+
+        import threading
+        self._stop = threading.Event()
+        self.thread = threading.Thread(target=self.Listen)
+        self.thread.start()
+
+    def Stop(self):
+        if self._stop:
+            self._stop.set()
+            self.thread.join()
+
+    def Listen(self):
+        poller = zmq.Poller()
+        poller.register(self.sock, zmq.POLLIN)
+        while not self._stop.isSet():
+            evts = poller.poll(1000)
+            if evts:
+                self.setter(evts[0][0].recv_pyobj())
+        print 'Exitting...'
+
+
 class NNPolicy(object):
-    def __init__(self, network_vars):
+    def __init__(self, network_vars, max_actions):
         self.vars = network_vars
-        self.actions = None
+        self.actions = range(max_actions)
+
+    def UpdateVars(self, new_vars):
+        self.vars = new_vars
 
     def Logits(self, state):
         state = np.matmul(state, self.vars['common/hidden1/weights:0'])
@@ -125,6 +156,9 @@ class NNPolicy(object):
         return Softmax(logits)
 
     def Sample(self, state):
+        if self.vars is None:
+            return random.choice(self.actions)
+
         sm = self.Softmax(state)
         if self.actions is None:
             self.actions = range(len(sm))
@@ -133,8 +167,25 @@ class NNPolicy(object):
     def Act(self, state):
         return self.Sample(state.to_numpy())
 
-    def Stop(self):
-    	pass
+
+class QPolicy(object):
+    def __init__(self, max_actions):
+        self.q = None
+        self.steps = 0
+        self.max_actions = max_actions
+
+    def UpdateVars(self, new_vars):
+        self.q = QFunction(new_vars)
+
+    def Act(self, state):
+        epsilon = 0.5 / (1 + self.steps / 1000.)
+        self.steps += 1
+
+        if np.random.rand() < epsilon or self.q is None:
+            return np.random.randint(0, self.max_actions)
+
+        res, _ = self.q.Select(state)
+        return res
 
 
 class DefaultPolicy(object):
@@ -162,56 +213,8 @@ class DefaultPolicy(object):
                 res = 1 # ADVANCE
         return res
 
-    def Stop(self):
+    def UpdateVars(self, new_vars):
         pass
-
-
-class RemotePolicy(object):
-    def __init__(self, address, max_actions):
-        if address and zmq:
-            self.sock = zmq.Context().socket(zmq.SUB)
-            self.sock.setsockopt(zmq.SUBSCRIBE, "")
-            self.sock.connect(address)
-            import threading
-            self._stop = threading.Event()
-            self.thread = threading.Thread(target=self.Listen)
-            self.thread.start()
-        else:
-            self.sock = None
-            self._stop = None
-
-        self.q = None
-        self.steps = 0
-        self.max_actions = max_actions
-        self.last_action = None
-        self.actions_debug = (['FLEE', 'ADVANCE'] +
-                              ['ATTACK_%d' %i for i in range(1, MAX_TARGETS_NUM + 1)])
-
-    def Stop(self):
-        if self._stop:
-            self._stop.set()
-            self.thread.join()
-
-    def Listen(self):
-        poller = zmq.Poller()
-        poller.register(self.sock, zmq.POLLIN)
-
-        while not self._stop.isSet():
-            evts = poller.poll(1000)
-            if evts:
-                self.q = QFunction(evts[0][0].recv_pyobj())
-                print 'Recieved coeff'
-        print 'Exitting...'
-
-    def Act(self, state):
-        epsilon = 0.5 / (1 + self.steps / 1000.)
-        self.steps += 1
-
-        if np.random.rand() < epsilon or self.q is None:
-            return np.random.randint(0, self.max_actions)
-
-        res, _ = self.q.Select(state)
-        return res
 
 
 NUM_ACTIONS = 2 + MAX_TARGETS_NUM
@@ -231,13 +234,19 @@ class MyStrategy:
         else:
             self.sock = None
 
-        if args and args.policy == 'q' and args.q_socket:
-            self.policy = RemotePolicy('tcp://127.0.0.1:%d' % args.q_socket, NUM_ACTIONS)
+        self.listener = None
+        if args and args.policy == 'q' and args.vars_socket:
+            self.policy = QPolicy(NUM_ACTIONS)
         elif args and args.policy == 'nn':
-            with open('network') as f:
-                self.policy = NNPolicy(cPickle.load(f))
+            # with open('network') as f:
+                # cPickle.load(f)
+            self.policy = NNPolicy(None, NUM_ACTIONS)
         else:
             self.policy = DefaultPolicy()
+
+        if self.args and self.args.vars_socket and zmq:
+            self.listener = VarsListener('tcp://127.0.0.1:%d' % args.vars_socket,
+                                         self.policy.UpdateVars)
 
         self.last_score = 0.
         self.initialized = False
@@ -281,14 +290,14 @@ class MyStrategy:
                     'Stats/Num Deaths': self.num_deaths
                 }})
             print 'Saving stats'
-        self.policy.Stop()
+        if self.listener:
+            self.listener.Stop()
 
     def SaveExperience(self, s, a, r, s1, gamma):
         if not self.sock or (s is None):
             return
 
-        s1 = s1.to_numpy() if s1 else None
-
+        s1 = s1.to_numpy() if s1 else s.to_numpy()
         self.exps.append({
             's': s.to_numpy(),
             'a': a,
@@ -298,19 +307,27 @@ class MyStrategy:
         })
 
         if s1 is None or len(self.exps) >= Q_N_STEPS:
-            rew = 0.
-            g = 1.
-            for exp in reversed(self.exps):
-                # if False:
-                #     rew += exp['r'] + exp['g'] * rew
-                #     g *= exp['g']
-                #     exp['s1'] = s1
-                #     exp['r'] = rew
-                #     exp['g'] = g
+            if self.args and self.args.n_step:
+                rew = 0.
+                g = 1.
+                for exp in reversed(self.exps):
+                    rew = exp['r'] + exp['g'] * rew
+                    g *= exp['g']
+                    exp['s1'] = s1
+                    exp['r'] = rew
+                    exp['g'] = g
 
-                self.sock.send_pyobj({'type': 'exp', 'data': exp})
-                if self.sock.recv() != "Ok":
-                    print "Error when sending experience"
+            s = np.array([e['s'] for e in self.exps])
+            a = np.array([e['a'] for e in self.exps], dtype=np.int32)
+            r = np.array([e['r'] for e in self.exps])
+            s1 = np.array([e['s1'] for e in self.exps])
+            g = np.array([e['g'] for e in self.exps])
+
+            self.sock.send_pyobj({'type': 'exp', 'data': {
+                's': s, 'a': a, 'r': r, 's1': s1, 'g': g
+            }})
+            if self.sock.recv() != "Ok":
+                print "Error when sending experience"
             self.exps = []
 
     def move(self, me, world, game, move):

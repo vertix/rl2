@@ -12,10 +12,11 @@ parser.add_argument('host', default="127.0.0.1", nargs='?')
 parser.add_argument('port', default=31001, type=int, nargs='?')
 parser.add_argument('token', default="0000000000000000", nargs='?')
 parser.add_argument('--exp_socket', default=0, type=int)
-parser.add_argument('--q_socket', default=0, type=int)
+parser.add_argument('--vars_socket', default=0, type=int)
 parser.add_argument('--policy', default='default', choices=['default', 'nn', 'q'])
 parser.add_argument('--verbose', action='store_true')
 parser.add_argument('--random_lane', action='store_true')
+parser.add_argument('--n_step', action='store_true')
 
 ARGS = parser.parse_args()
 
