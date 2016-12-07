@@ -193,9 +193,8 @@ class DefaultPolicy(object):
         mes = state.my_state
         me = mes.unit
         state.dbg_text(me, mes.fireball_cooldown)
-        if (mes.hp -
-            mes.max_hp * 0.63 -
-            mes.expected_overtime_damage < mes.aggro):
+        if (mes.hp - mes.aggro - mes.expected_overtime_damage 
+            < mes.max_hp * 0.63):
             res = 0 # FLEE
         else:
             target_and_damage = PickBestFireballTarget(me, state)
