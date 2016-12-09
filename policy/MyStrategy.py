@@ -19,7 +19,6 @@ from model.World import World
 
 from Analysis import PickTarget
 from Analysis import HistoricStateTracker
-from Analysis import PickBestFireballTarget
 
 from Geometry import GetLanes
 
@@ -194,22 +193,24 @@ class DefaultPolicy(object):
         me = mes.unit
         state.dbg_text(me, mes.fireball_cooldown)
         if (mes.hp - mes.aggro - mes.expected_overtime_damage 
-            < mes.max_hp * 0.63):
-            res = 0 # FLEE
+            < mes.max_hp * 0.30):
+            return 0 # FLEE_IN_TERROR
+        if mes.fireball_projected_damage > 0 and (
+            (mes.mana > 0.9 * mes.max_mana) or (
+             mes.fireball_projected_damage >= mes.fireball * 2)):
+             return 2 # FIREBALL
+        if (mes.hp - mes.aggro - mes.expected_overtime_damage < mes.max_hp * 0.63):
+            return 1 # FLEE
+        if mes.lane not in GetLanes(me):
+            return 3 # ADVANCE
+        u = PickTarget(me, ActionType.MAGIC_MISSILE, state,
+                       radius=MAX_ATTACK_DISTANCE)
+        if u:
+            e_ids = [e.unit.id for e in state.enemy_states[:MAX_TARGETS_NUM]]
+            idx = e_ids.index(u.id) if u.id in e_ids else 0
+            res = 4 + idx   # ATTACK
         else:
-            target_and_damage = PickBestFireballTarget(me, state)
-            if (target_and_damage is not None) and ((mes.mana > 0.8 * mes.max_mana) or (
-                target_and_damage.CombinedDamage(state) >= mes.fireball * 1.5)):
-                mes.fireball_target = target_and_damage.target
-                return 2 # FIREBALL
-            u = PickTarget(me, ActionType.MAGIC_MISSILE, state,
-                           radius=MAX_ATTACK_DISTANCE, lane=mes.lane)
-            if u:
-                e_ids = [e.unit.id for e in state.enemy_states[:MAX_TARGETS_NUM]]
-                idx = e_ids.index(u.id) if u.id in e_ids else 0
-                res = 3 + idx   # ATTACK
-            else:
-                res = 1 # ADVANCE
+            res = 3 # ADVANCE
         return res
 
     def UpdateVars(self, new_vars):
@@ -257,6 +258,7 @@ class MyStrategy:
         self.exps = []
         self.next_file_index = 0
         self.flee_action = None
+        self.flee_in_terror_action = None
         self.advance_action = None
         self.fireball_action = None
 
@@ -344,12 +346,15 @@ class MyStrategy:
             l = self.GetLane(me)
             if l is not None:
                 self.lane = l
+                self.flee_in_terror_action = Actions.FleeInTerrorAction(
+                    game.map_size, self.lane)
                 self.flee_action = Actions.FleeAction(game.map_size, self.lane)
-                self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
                 self.fireball_action = Actions.FireballAction(game.map_size, self.lane)
+                self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
 
         if self.flee_action is None:
             self.lane = np.random.choice(LANES)
+            self.flee_in_terror_action = Actions.FleeInTerrorAction(game.map_size, self.lane)
             self.flee_action = Actions.FleeAction(game.map_size, self.lane)
             self.advance_action = Actions.AdvanceAction(game.map_size, self.lane)
             self.fireball_action = Actions.FireballAction(game.map_size, self.lane)
@@ -360,7 +365,8 @@ class MyStrategy:
 
         targets = [enemy.unit for enemy in state.enemy_states
                    if enemy.dist < 1000][:MAX_TARGETS_NUM]
-        actions = ([self.flee_action, self.advance_action, self.fireball_action] +
+        actions = ([self.flee_in_terror_action, self.flee_action,
+                    self.fireball_action, self.advance_action] +
                    [Actions.MeleeAttack(game.map_size, self.lane, t) for t in targets] +
                    [noop] * (MAX_TARGETS_NUM - len(targets)))
 

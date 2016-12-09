@@ -21,6 +21,7 @@ from Analysis import IsEnemy
 from Analysis import BuildMinionTargets
 from Analysis import Closest
 from Analysis import NeutralMinionInactive
+from Analysis import PickBestFireballTarget
 
 from Geometry import GetLanes
 from Geometry import Point
@@ -717,7 +718,17 @@ class MyState(WizardState):
         world_state.index[me.id] = self
         self.cached_aggro = GetAggro(me, 10, world_state)
         self.fireball_target = None
+        self.fireball_projected_damage = 0
+        if self.fireball_cooldown < 3:
+            target_and_damage = PickBestFireballTarget(me, world_state)
+            if target_and_damage is not None:
+                self.fireball_projected_damage = target_and_damage.CombinedDamage(world_state)
+                self.fireball_target = target_and_damage.target
         
+    @property
+    def max_fireball_damage(self):
+        return self.fireball_projected_damage
+
     @property
     def aggro(self):
         return self.cached_aggro
@@ -728,7 +739,7 @@ class MyState(WizardState):
 
     def _to_numpy_internal(self):
         return np.hstack([super(MyState, self)._to_numpy_internal(),
-                          np.array([self.aggro, self.current_lane])])
+                          np.array([self.aggro, self.current_lane, self.max_fireball_damage])])
 
 
 MAX_ENEMIES = 10

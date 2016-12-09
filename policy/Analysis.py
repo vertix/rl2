@@ -32,6 +32,7 @@ INFINITY = 1e6
 AGGRO_TICKS = 20
 MAX_RANGE = 1000
 MAX_TARGETS = 3
+MACRO_EPSILON = 1
 
 class TargetAndDamage(object):
     def __init__(self, target):
@@ -60,9 +61,11 @@ def GetFireballDamage(mes, t, p, state):
         ws = state.index[t.id]
         d = p.GetDistanceTo(mes.unit)
         time = d / state.game.fireball_speed
-        final_distance = p.GetDistanceTo(t) + time * ws.strafe_speed - t.radius
+        final_distance = p.GetDistanceTo(t) - t.radius + MACRO_EPSILON
+        if t.faction != mes.unit.faction:
+             final_distance += time * ws.forward_speed
     else:
-        final_distance = p.GetDistanceTo(t) - t.radius
+        final_distance = p.GetDistanceTo(t) - t.radius + MACRO_EPSILON
     if final_distance > state.game.fireball_explosion_min_damage_range:
         return 0
     if final_distance < state.game.fireball_explosion_max_damage_range:
@@ -101,7 +104,7 @@ def PickBestFireballTarget(me, state):
                         -state.index[x.id].damage, -state.index[x.id].hp))]
     targets = []
     for t in sorted_targets:
-        t.radius += state.game.fireball_explosion_min_damage_range
+        t.radius += state.game.fireball_explosion_min_damage_range - MACRO_EPSILON
         targets.append(t)
     candidates = []
     segments = []
@@ -126,6 +129,9 @@ def PickBestFireballTarget(me, state):
                 candidates.append(intersection)
     best = None
     friend_wizards = [w for w in state.world.wizards if w.faction == me.faction]
+    for t in targets:
+        t.radius -= state.game.fireball_explosion_min_damage_range - MACRO_EPSILON
+
     for c in candidates:
         d = c.GetDistanceTo(me)
         if d > me.cast_range:
@@ -161,6 +167,8 @@ def PickBestFireballTarget(me, state):
             best = res
     if best is not None:
         state.dbg_circle(PlainCircle(best.target, 5), BLUE)
+        if best.CombinedDamage(state) < 10:
+            return None
     return best
 
 def GetAggroFromDamage(damage, remaining_cooldown, cooldown, deepness):
@@ -173,6 +181,7 @@ def GetUnitAggro(mes, us, deep_in_range, state):
     runaway_speed = max(1.0, speed - us.max_speed)
     time_to_leave = deep_in_range / runaway_speed
     if isinstance(us.unit, Wizard):
+        # TODO(vyakunin): this should increase TTL for all units!
         if (us.frost_bolt > 0 and us.frost_bolt_cooldown < time_to_leave):
             time_to_leave += state.game.frozen_duration_ticks
         

@@ -350,6 +350,33 @@ class MoveAction(object):
                     move.turn = angle_to_target
 
 
+class FleeInTerrorAction(MoveAction):
+    def __init__(self, map_size, lane, safe_distance=30):
+        MoveAction.__init__(self, map_size, lane)
+        self.safe_distance = safe_distance
+
+    @property
+    def name(self):
+        return "FLEE_IN_TERROR"
+
+    def Act(self, me, state):
+        move = Move()
+        self.dodging = self.MaybeDodge(move, state)
+        aggro = GetAggro(me, self.safe_distance, state)
+        if aggro > 0:
+            # print 'flee with aggro'
+            if not self.dodging:
+                self.MakeFleeMove(me, move, state)
+        else:
+            # print 'rush'
+            if not self.dodging:
+                self.MakeAdvanceMove(me, move, state)
+
+        self.MaybeSetLanes(me, move)
+        self.MaybeLearnSkills(me, move)  
+        return move
+
+
 class FleeAction(MoveAction):
     def __init__(self, map_size, lane, safe_distance=20, opt_range_allowance=20):
         MoveAction.__init__(self, map_size, lane)
@@ -444,6 +471,8 @@ class FireballAction(MoveAction):
         self.dodging = self.MaybeDodge(move, state)
         t = state.my_state.fireball_target
         angle = me.get_angle_to_unit(t)
+        if not self.dodging:
+            self.RushToTarget(me, t, move, state)
         if abs(angle) < state.game.staff_sector / 2:
             move.action = ActionType.FIREBALL
             move.cast_angle = angle
