@@ -15,7 +15,7 @@ from Geometry import Point
 from Geometry import HasMeleeTarget
 from Geometry import TargetInRangeWithAllowance
 from Geometry import ProjectileWillHit
-from Geometry import PickDodgeDirection
+from Geometry import PickDodgeDirectionAndTime
 from Geometry import PlainCircle
 from CachedGeometry import Cache
 from Analysis import GetAggro
@@ -39,6 +39,7 @@ MISSILE_DISTANCE_ERROR = 10
 MARGIN = 300
 INFINITY=1e6
 EPSILON = 1e-5
+MACRO_EPSILON = 1
 last_x = -1
 last_y = -1
 
@@ -201,9 +202,9 @@ class MoveAction(object):
     def MaybeLearnSkills(self, me, move):
         if self.LearnFireball(me, move):
             return
-        if self.LearnDamage(me, move):
-            return
         if self.LearnRange(me, move):
+            return
+        if self.LearnDamage(me, move):
             return
 
     def MaybeDodge(self, move, state):
@@ -211,12 +212,12 @@ class MoveAction(object):
             ps = state.index[p.id]
             me = state.my_state.unit
             if (ProjectileWillHit(ps, me) and
-                CanDodge(me, ps, state)):
-                t = PickDodgeDirection(me, ps, state)
+                CanDodge(me, ps, state, MACRO_EPSILON, fine_tune=False)):
+                t = PickDodgeDirectionAndTime(me, ps, state, MACRO_EPSILON)
                 if t is not None:
                     self.dodging = True
-                    state.dbg_line(me, t, RED)
-                    self.RushToTarget(me, t, move, state)
+                    state.dbg_line(me, t.direction, RED)
+                    self.RushToTarget(me, t.direction, move, state)
                     return True
         return False
         
@@ -329,6 +330,10 @@ class MoveAction(object):
 
        
         if abs(angle_to_target) > abs(math.atan2(t.radius, distance)):
+            move.action = ActionType.NONE
+        if mes.fireball > 0 and me.mana < state.game.fireball_manacost:
+            move.action = ActionType.NONE
+        if mes.frost_bolt > 0 and me.mana < state.game.frost_bolt_manacost:
             move.action = ActionType.NONE
         
         

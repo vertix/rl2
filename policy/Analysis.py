@@ -1,4 +1,3 @@
-from collections import namedtuple
 from copy import deepcopy
 
 from model.Faction import Faction
@@ -20,6 +19,7 @@ from Geometry import Segment
 from Geometry import PlainCircle
 from Geometry import IntersectCircles
 from Geometry import IntersectSegments
+from Geometry import PickDodgeDirectionAndTime
 from math import sqrt
 
 from Colors import RED
@@ -136,11 +136,13 @@ def PickBestFireballTarget(me, state):
         d = c.GetDistanceTo(me)
         if d > me.cast_range:
             c = Point.FromUnit(me) + (c - me) * (me.cast_range / d)
+            d = c.GetDistanceTo(me)
         state.dbg_circle(PlainCircle(c, 3), GREEN)
         res = TargetAndDamage(c)
-        if d < state.game.fireball_explosion_min_damage_range + me.radius + mes.max_speed:
+        if d < state.game.fireball_explosion_min_damage_range + me.radius + mes.max_speed + MACRO_EPSILON:
             c = Point.FromUnit(me) + (c - me) * ((
-                state.game.fireball_explosion_min_damage_range + me.radius + mes.max_speed) / d)
+                state.game.fireball_explosion_min_damage_range + me.radius + mes.max_speed + MACRO_EPSILON) / d)
+            d = c.GetDistanceTo(me)
         for t in targets:
             damage = GetFireballDamage(mes, t, c, state)
             if damage > 0:
@@ -248,11 +250,15 @@ def BuildEnemies(me, radius, state):
 def BuildTargets(me, radius, state):
     return [t for t in BuildEnemies(me, radius, state) if IsValidTarget(me, t, state)]
 
-def CanDodge(w, ps, state):
+def CanDodge(w, ps, state, projectile_radius_modifier=-MACRO_EPSILON, fine_tune=True):
     # debug_string = ''
-    psp = Point.FromUnit(ps.p)
     wp = Point.FromUnit(w)
-    d = psp.GetDistanceTo(wp) - w.radius - ps.max_radius
+    if (wp.GetDistanceToSegment(ps.center_line) >
+        ps.max_radius + projectile_radius_modifier + w.radius):
+        return True
+    psp = Point.FromUnit(ps.p)
+    projectile_distance = ps.start.GetDistanceTo(ps.end)
+    d = min(projectile_distance, wp.ProjectToLine(ps.center_line.l).GetDistanceTo(ps.start))
     state.dbg_circle(PlainCircle(ps.end, ps.max_radius + w.radius))
     state.dbg_line(ps.border1.p1, ps.border1.p2)
     state.dbg_line(ps.border2.p1, ps.border2.p2)
@@ -260,13 +266,17 @@ def CanDodge(w, ps, state):
     distance_to_circle = INFINITY
     # debug_string += 'w_to_start: %.0f\n' % wp.GetDistanceTo(ps.start)
     # debug_string += 'start_to_end: %.0f\n' % ps.start.GetDistanceTo(ps.end)
-    if wp.GetDistanceTo(ps.start) > ps.start.GetDistanceTo(ps.end):
-        distance_to_circle = ps.max_radius + w.radius - wp.GetDistanceTo(ps.end)
+    if ((ps.end - ps.start).ScalarMul(wp - ps.start) > 0
+        and (ps.end - ps.start).ScalarMul(wp - ps.end) > 0):
+        distance_to_circle = (ps.max_radius + projectile_radius_modifier +
+                              w.radius - wp.GetDistanceTo(ps.end))
+        
     # debug_string += 'd_to_circle: %.0f\n' % distance_to_circle
     # debug_string += 'd_to_border1: %.0f\n' % wp.GetDistanceToSegment(ps.border1)
     # debug_string += 'd_to_border2: %.0f\n' % wp.GetDistanceToSegment(ps.border2)
 
-    min_d = min(wp.GetDistanceToSegment(ps.border1), wp.GetDistanceToSegment(ps.border2),
+    min_d = min(wp.GetDistanceToSegment(ps.border1) + projectile_radius_modifier,
+                wp.GetDistanceToSegment(ps.border2) + projectile_radius_modifier,
                 distance_to_circle)
     # debug_string += 'min_d:\n%.1f\ntime * max_speed:\n%.1f*%.1f=%.1f' % (
     #                    min_d,
@@ -274,7 +284,11 @@ def CanDodge(w, ps, state):
     #                    state.index[w.id].max_speed,
     #                    time * state.index[w.id].max_speed)
     # state.dbg_text(w, debug_string, RED)
-    return min_d < time * state.index[w.id].max_speed
+    if min_d > time * state.index[w.id].max_speed:
+        return False
+    if fine_tune:
+        return PickDodgeDirectionAndTime(w, ps, state, projectile_radius_modifier) is not None
+    return True
     
 def ActionToProjectileTypeAndRadius(a, state):
     if a == ActionType.FIREBALL:

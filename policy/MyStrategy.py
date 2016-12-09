@@ -192,9 +192,9 @@ class DefaultPolicy(object):
         mes = state.my_state
         me = mes.unit
         state.dbg_text(me, mes.fireball_cooldown)
-        if (mes.hp - mes.aggro - mes.expected_overtime_damage 
-            < mes.max_hp * 0.30):
-            return 0 # FLEE_IN_TERROR
+        # if (mes.hp - mes.aggro - mes.expected_overtime_damage
+        #     < mes.max_hp * 0.30):
+        #     return 0 # FLEE_IN_TERROR
         if mes.fireball_projected_damage > 0 and (
             (mes.mana > 0.9 * mes.max_mana) or (
              mes.fireball_projected_damage >= mes.fireball * 2)):

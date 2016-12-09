@@ -110,6 +110,7 @@ class ProjectileState(State):
             self.expected_speed = old_p.expected_speed
             self.border1 = old_p.border1
             self.border2 = old_p.border2
+            self.center_line = old_p.center_line
             return
         if p.owner_unit_id in last_state.index:
             owner = last_state.index[p.owner_unit_id]
@@ -117,7 +118,7 @@ class ProjectileState(State):
             self.expected_end = Point.FromUnit(self.unit)
             self.min_damage = self.max_damage = 0.0
             self.expected_speed = math.hypot(p.speed_x, p.speed_y)
-            self.border1 = self.border2 = Segment(self.start, self.end)
+            self.border1 = self.border2 = self.center_line = Segment(self.start, self.end)
             return
             
         if self.p.type == ProjectileType.FIREBALL:
@@ -156,8 +157,8 @@ class ProjectileState(State):
                 else:
                     self.expected_end = intersections[1]
                 self.dbg_line(start_point, self.expected_end, GREEN)
-        self.center_line = Line(self.expected_end, start_point)
-        shift = self.center_line.Normal() * (self.max_radius + me.radius + MACRO_EPSILON)
+        self.center_line = Segment(self.expected_end, start_point)
+        shift = self.center_line.l.Normal() * (self.max_radius + me.radius + MACRO_EPSILON)
         self.border1 = Segment(
             start_point + shift,
             self.expected_end + shift)
