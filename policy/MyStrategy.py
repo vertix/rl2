@@ -63,6 +63,8 @@ def BatchNorm(state, network_vars, key, shift=True, eps=0.001):
 def Normalize(state, mean, std):
     return (state - mean) / std
 
+def Dropout(x, keep_prob):
+    return x * np.random.binomial(1, keep_prob, x.shape) / keep_prob
 
 def Softmax(state):
     state -= np.max(state)
@@ -71,8 +73,9 @@ def Softmax(state):
 
 
 class QFunction(object):
-    def __init__(self, network_vars):
+    def __init__(self, network_vars, keep_prob):
         self.vars = network_vars
+        self.keep_prob = keep_prob
 
     def Q(self, state):
         state = Normalize(state, self.vars['mean:0'], self.vars['std:0'])
@@ -83,10 +86,16 @@ class QFunction(object):
         # state = BatchNorm(state, self.vars, 'model/hidden1/BatchNorm')
         state = Elu(state)
 
+        if self.keep_prob < 1.:
+            state = Dropout(state, self.keep_prob)
+
         state = np.matmul(state, self.vars['model/hidden2/weights:0'])
         state += self.vars['model/hidden2/biases:0']
         # state = BatchNorm(state, self.vars, 'model/hidden2/BatchNorm')
         state = Elu(state)
+
+        if self.keep_prob < 1.:
+            state = Dropout(state, self.keep_prob)
 
         # value = np.matmul(state, self.vars['model/val_hid/weights:0'])
         # value += self.vars['model/val_hid/biases:0']
@@ -180,13 +189,14 @@ class NNPolicy(object):
 
 
 class QPolicy(object):
-    def __init__(self, max_actions):
+    def __init__(self, max_actions, keep_prob=1.0):
         self.q = None
         self.steps = 0
         self.max_actions = max_actions
+        self.keep_prob = keep_prob
 
     def UpdateVars(self, new_vars):
-        self.q = QFunction(new_vars)
+        self.q = QFunction(new_vars, self.keep_prob)
 
     def Act(self, state):
         epsilon = 0.5 / (1 + self.steps / 1000.)
@@ -237,7 +247,7 @@ class MyStrategy:
 
         self.listener = None
         if args and args.policy == 'q' and args.vars_socket:
-            self.policy = QPolicy(NUM_ACTIONS)
+            self.policy = QPolicy(NUM_ACTIONS, args.dropout)
         elif args and args.policy == 'nn':
             # with open('network') as f:
                 # cPickle.load(f)
