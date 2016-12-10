@@ -17,6 +17,7 @@ parser.add_argument('--policy', default='default', choices=['default', 'nn', 'q'
 parser.add_argument('--verbose', action='store_true')
 parser.add_argument('--random_lane', action='store_true')
 parser.add_argument('--n_step', action='store_true')
+parser.add_argument('--dropout', default=1.0, type=float)
 
 ARGS = parser.parse_args()
 
