@@ -49,11 +49,19 @@ def ReLu(x):
     return np.maximum(x, 0)
 
 
-def BatchNorm(state, network_vars, key):
-    eps = 0.001
+def Elu(x):
+    return np.where(x < 0, np.exp(x) - 1, x)
+
+def BatchNorm(state, network_vars, key, shift=True, eps=0.001):
     inv = 1.0 / np.sqrt(network_vars[key + '/moving_variance:0'] + eps)
 
-    return state * inv + (network_vars[key + '/beta:0'] - network_vars[key + '/moving_mean:0'] * inv)
+    if shift:
+        return state * inv + (network_vars[key + '/beta:0'] - network_vars[key + '/moving_mean:0'] * inv)
+    else:
+        return state * inv + (-network_vars[key + '/moving_mean:0'] * inv)
+
+def Normalize(state, mean, std):
+    return (state - mean) / std
 
 
 def Softmax(state):
@@ -67,15 +75,18 @@ class QFunction(object):
         self.vars = network_vars
 
     def Q(self, state):
+        state = Normalize(state, self.vars['mean:0'], self.vars['std:0'])
+        # state = BatchNorm(state, self.vars, 'model/norm', shift=False)
+
         state = np.matmul(state, self.vars['model/hidden1/weights:0'])
         state += self.vars['model/hidden1/biases:0']
         # state = BatchNorm(state, self.vars, 'model/hidden1/BatchNorm')
-        state = ReLu(state)
+        state = Elu(state)
 
         state = np.matmul(state, self.vars['model/hidden2/weights:0'])
         state += self.vars['model/hidden2/biases:0']
         # state = BatchNorm(state, self.vars, 'model/hidden2/BatchNorm')
-        state = ReLu(state)
+        state = Elu(state)
 
         # value = np.matmul(state, self.vars['model/val_hid/weights:0'])
         # value += self.vars['model/val_hid/biases:0']
@@ -91,7 +102,8 @@ class QFunction(object):
         adv = np.matmul(state, self.vars['model/advantage/weights:0'])
         adv += self.vars['model/advantage/biases:0']
 
-        return value + (adv - adv.mean())
+        return value + (adv - adv.mean(keepdims=True))
+        # return value + (adv - adv.mean(1, keepdims=True))
 
     def Select(self, state):
         value = self.Q(state.to_numpy())
