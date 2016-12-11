@@ -448,7 +448,7 @@ class WizardState(LivingUnitState):
             da = da / abs(da) * self.max_rotation_speed
             speed = Point(1.0, 0.0).Rotate(self.unit.angle + da)
         t, r = ActionToProjectileTypeAndRadius(action, game)
-        fake_p = Projectile(id=(self.unit.id + 1) * (-5) - action,
+        fake_p = Projectile(id=(self.unit.id + 1000) * (-5) - action,
             x=self.unit.x, y=self.unit.y,
             speed_x=speed.x, speed_y=speed.y,
             angle=speed.GetAngle(), faction=self.unit.faction,

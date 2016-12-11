@@ -31,11 +31,11 @@ from Colors import BLUE
 CAST_RANGE_ERROR = 0
 EPSILON = 1e-4
 INFINITY = 1e6
-AGGRO_TICKS = 20
+AGGRO_TICKS = 60
 MAX_RANGE = 1000
 MAX_TARGETS = 4
 MACRO_EPSILON = 1
-BUILDING_EXTRA_TIME_TO_LEAVE = 10
+BUILDING_EXTRA_TIME_TO_LEAVE = 0
 
 class TargetAndDamage(object):
     def __init__(self, target):
@@ -399,6 +399,8 @@ def RealFleeDistance(me, enemy, t, d, state):
     if me.get_distance_to_unit(enemy) > d - EPSILON:
         return 0
     st = path.GetCurrentTransitionId(me)
+    if st is None:
+        return INFINITY
     cp = Point.FromUnit(me)
     for i in range(st, len(path.transitions)):
         t = path.transitions[i]

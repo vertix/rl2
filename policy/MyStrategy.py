@@ -394,6 +394,7 @@ class MyStrategy:
                    [noop] * (MAX_TARGETS_NUM - len(targets)))
 
         a = self.policy.Act(state)
+        
         if self.args and self.args.verbose and a != self.last_action:
             print actions[a].name
 
