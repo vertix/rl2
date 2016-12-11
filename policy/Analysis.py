@@ -12,6 +12,8 @@ from model.Projectile import Projectile
 from model.ProjectileType import ProjectileType
 from model.LivingUnit import LivingUnit
 
+from CachedGeometry import Cache
+
 from Geometry import RangeAllowance
 from Geometry import GetLanes
 from Geometry import Point
@@ -31,8 +33,9 @@ EPSILON = 1e-4
 INFINITY = 1e6
 AGGRO_TICKS = 20
 MAX_RANGE = 1000
-MAX_TARGETS = 3
+MAX_TARGETS = 4
 MACRO_EPSILON = 1
+BUILDING_EXTRA_TIME_TO_LEAVE = 10
 
 class TargetAndDamage(object):
     def __init__(self, target):
@@ -179,9 +182,11 @@ def GetAggroFromDamage(damage, remaining_cooldown, cooldown, deepness):
 
 def GetUnitAggro(mes, us, deep_in_range, state):
     aggro = 0.0
-    speed = mes.forward_speed
+    speed = mes.strafe_speed
     runaway_speed = max(1.0, speed - us.max_speed)
     time_to_leave = deep_in_range / runaway_speed
+    if isinstance(us.unit, Building):
+        time_to_leave += BUILDING_EXTRA_TIME_TO_LEAVE
     if isinstance(us.unit, Wizard):
         # TODO(vyakunin): this should increase TTL for all units!
         if (us.frost_bolt > 0 and us.frost_bolt_cooldown < time_to_leave):
@@ -290,19 +295,19 @@ def CanDodge(w, ps, state, projectile_radius_modifier=-MACRO_EPSILON, fine_tune=
         return PickDodgeDirectionAndTime(w, ps, state, projectile_radius_modifier) is not None
     return True
     
-def ActionToProjectileTypeAndRadius(a, state):
+def ActionToProjectileTypeAndRadius(a, game):
     if a == ActionType.FIREBALL:
-        return (ProjectileType.FIREBALL, state.game.fireball_explosion_min_damage_range)
+        return (ProjectileType.FIREBALL, game.fireball_explosion_min_damage_range)
     if a == ActionType.FROST_BOLT:
-        return (ProjectileType.FROST_BOLT, state.game.frost_bolt_radius)
-    return (ProjectileType.MAGIC_MISSILE, state.game.magic_missile_radius)
+        return (ProjectileType.FROST_BOLT, game.frost_bolt_radius)
+    return (ProjectileType.MAGIC_MISSILE, game.magic_missile_radius)
 
 def CanHitWizard(me, w, action, state, strict=False):
     if action == ActionType.STAFF:
         return True
     ws = state.index[w.id]
     mes = state.index[me.id]
-    t, r = ActionToProjectileTypeAndRadius(action, state)
+    t, r = ActionToProjectileTypeAndRadius(action, state.game)
     
     speed = Point.FromUnit(w) - Point.FromUnit(me)
     if strict:
@@ -326,10 +331,13 @@ def PickReachableTarget(me, cast_range, action, state, radius=MAX_RANGE, lane=No
     min_hp = INFINITY
     best_type = 0
     best = None
+    best_dodging_wizard = None
     for e in enemies:
         t = 0
         if isinstance(e, Wizard):
             if (radius < INFINITY) and (not CanHitWizard(me, e, action, state)):
+                if best_dodging_wizard is None or best_dodging_wizard.life > e.life:
+                    best_dodging_wizard = e
                 continue
             t = 2
         if isinstance(e, Building):
@@ -339,6 +347,8 @@ def PickReachableTarget(me, cast_range, action, state, radius=MAX_RANGE, lane=No
             min_hp = e.life
             best = e
             best_type = t
+    if best is None:
+        best = best_dodging_wizard
     return best
     
 def IsEnemy(u1, u2):
@@ -381,7 +391,30 @@ def NeutralMinionInactive(m):
     return ((abs(m.speed_x) + abs(m.speed_y) < EPSILON) and
             m.life == m.max_life)
 
+def RealFleeDistance(me, enemy, t, d, state):
+    path = Cache.GetInstance().GetPathToTarget(me, t, state)
+    if path is None:
+        return INFINITY
+    real_d = 0
+    if me.get_distance_to_unit(enemy) > d - EPSILON:
+        return 0
+    st = path.GetCurrentTransitionId(me)
+    cp = Point.FromUnit(me)
+    for i in range(st, len(path.transitions)):
+        t = path.transitions[i]
+        end_to_enemy = t.end.GetDistanceTo(enemy)
+        beg_to_enemy = cp.GetDistanceTo(enemy)
+        remaining_d = max(1, d - beg_to_enemy)
+        transition_increase = max(remaining_d, end_to_enemy - beg_to_enemy)
+        if end_to_enemy > d:
+            return real_d + cp.GetDistanceTo(t.end) * (remaining_d / transition_increase)
+        real_d += cp.GetDistanceTo(t.end)
+        cp = t.end
+    return real_d / cp.GetDistanceTo(enemy) * d
+
 def GetAggro(me, safe_distance, state):
+    if state.last_flee_target is None:
+        return 0
     allies = [a for a in state.world.wizards + state.world.minions + state.world.buildings if
               (a.id != me.id) and (a.faction == me.faction) and 
               (a.get_distance_to_unit(me) < me.vision_range * 1.5)]
@@ -394,8 +427,11 @@ def GetAggro(me, safe_distance, state):
             # if not (e.id in state.index):
             #     import pdb; pdb.set_trace()
             es = state.index[e.id]
-            d = es.dist
-            deepness = (es.aggro_range + safe_distance + es.max_speed - d)
+            deepness = RealFleeDistance(
+                me, e,
+                state.last_flee_target,
+                es.aggro_range + safe_distance + es.max_speed,
+                state)
             if deepness > 0:
                 aggro += GetUnitAggro(mes, es, deepness, state)
     aggro = mes.get_effective_damage_to_me(aggro) 

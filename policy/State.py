@@ -15,6 +15,7 @@ from model.World import World
 from model.SkillType import SkillType
 from model.StatusType import StatusType
 from model.ProjectileType import ProjectileType
+from model.Projectile import Projectile
 
 from Analysis import GetAggro
 from Analysis import IsEnemy
@@ -22,6 +23,7 @@ from Analysis import BuildMinionTargets
 from Analysis import Closest
 from Analysis import NeutralMinionInactive
 from Analysis import PickBestFireballTarget
+from Analysis import ActionToProjectileTypeAndRadius
 
 from Geometry import GetLanes
 from Geometry import Point
@@ -116,6 +118,7 @@ class ProjectileState(State):
         need_to_subtract = False
         if p.owner_unit_id in last_state.index:
             owner = last_state.index[p.owner_unit_id]
+            need_to_subtract = True
         elif p.owner_unit_id in state.last_seen:
             owner = state.last_seen[p.owner_unit_id]
             need_to_subtract = True
@@ -431,6 +434,27 @@ class WizardState(LivingUnitState):
         self.cached_missile_total_cooldown = game.magic_missile_cooldown_ticks
         if SkillType.ADVANCED_MAGIC_MISSILE in self.unit.skills:
             self.cached_missile_total_cooldown = game.wizard_action_cooldown_ticks
+        if w.faction != me.faction and self.fireball and self.fireball_cooldown == 0:
+            self.add_fake_projectile(ActionType.FIREBALL, me, world, game)
+        if w.faction != me.faction and self.frost_bolt and self.frost_bolt_cooldown == 0:
+            self.add_fake_projectile(ActionType.FROST_BOLT, me, world, game)
+        if w.faction != me.faction and self.missile_cooldown == 0:
+            self.add_fake_projectile(ActionType.MAGIC_MISSILE, me, world, game)
+            
+    def add_fake_projectile(self, action, me, world, game):
+        da = self.unit.get_angle_to_unit(me)
+        speed = Point.FromUnit(self.unit) - Point.FromUnit(me)
+        if abs(da) > self.max_rotation_speed:
+            da = da / abs(da) * self.max_rotation_speed
+            speed = Point(1.0, 0.0).Rotate(self.unit.angle + da)
+        t, r = ActionToProjectileTypeAndRadius(action, game)
+        fake_p = Projectile(id=(self.unit.id + 1) * (-5) - action,
+            x=self.unit.x, y=self.unit.y,
+            speed_x=speed.x, speed_y=speed.y,
+            angle=speed.GetAngle(), faction=self.unit.faction,
+            radius=r, type=t, owner_unit_id=self.unit.id,
+            owner_player_id=self.unit.owner_player_id)
+        self.world.projectiles.append(fake_p)
 
     def handle_improvements(self, w, game, world):
         haste_aura1 = False
@@ -790,15 +814,20 @@ def clean_world(me, world):
 class WorldState(State):
     def __init__(self, me, world, game, lane, last_state, dbg):
         super(WorldState, self).__init__(None, me, dbg)
+        self.my_state = None
         if last_state is not None:
             last_state.last_state = None
             self.last_state = last_state
             self.enemy_base_hp = self.last_state.enemy_base_hp
             self.last_seen = last_state.last_seen
             last_state.last_seen = None
+            self.last_flee_target = last_state.last_flee_target
+            self.cached_my_state = last_state.my_state
         else:
             self.enemy_base_hp = 1000
             self.last_seen = {}
+            self.last_flee_target = None
+            self.cached_my_state = None
 
         self.world = world
         clean_world(me, world)
@@ -842,7 +871,11 @@ class WorldState(State):
         # for s in self.friend_states:
         #     assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
 
-
+    def GetMyState(self):
+        if self.my_state is not None:
+            return self.my_state
+        return self.cached_my_state
+    
     @property
     def ticks_until_end(self):
         return (self.world.tick_count - self.world.tick_index)

@@ -146,6 +146,16 @@ class Path(object):
                 current = t
         return current
     
+    def GetCurrentTransitionId(self, u):
+        current = None
+        closest = INFINITY
+        for id, t in reversed(list(enumerate(self.transitions))):
+            d = t.GetDistanceTo(u)
+            if d < closest - MACRO_EPSILON:
+                closest = d
+                current = id
+        return current
+    
     def GetNextAngleDistanceAndTargets(self, u):
         current = self.GetCurrentTransition(u)
         if current is None:
@@ -438,7 +448,7 @@ def GetDamagePerTicks(damage, remaining_cooldown, cooldown, ticks):
 def GetTreeCost(start, ids, state):
     if not ids:
         return 0.0
-    ms = state.my_state
+    ms = state.GetMyState()
     cd = 0
     scd = 0
     speed = ms.max_speed

@@ -252,12 +252,14 @@ class MoveAction(object):
         return None
 
     def MakeFleeMove(self, me, move, state):
-        waypoints = self.waypoints_by_lane[self.lane]
-        i = GetPrevWaypoint(waypoints, me)
-        target = waypoints[i]
+        state.last_flee_target = target = self.GetFleeTarget(me)
         # print Point.FromUnit(me), target
         self.RushToTarget(me, target, move, state)
-            
+    
+    def GetFleeTarget(self, me):
+        waypoints = self.waypoints_by_lane[self.lane]
+        i = GetPrevWaypoint(waypoints, me)
+        return waypoints[i]
 
     def MakeAdvanceMove(self, me, move, state):
         waypoints = self.waypoints_by_lane[self.lane]
@@ -311,9 +313,7 @@ class MoveAction(object):
             if n_t is not None:
                 t = n_t
                 distance = me.get_distance_to_unit(t)
-                if (not TargetInRangeWithAllowance(me, t, -radius, state) or
-                    (isinstance(t, Wizard) and 
-                     not CanHitWizard(me, t, action, state, True))):
+                if not TargetInRangeWithAllowance(me, t, -radius, state):
                     move.action = ActionType.NONE
             else:
                 move.action = ActionType.NONE
