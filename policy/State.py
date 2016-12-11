@@ -365,7 +365,7 @@ class LivingUnitState(State):
     @property
     def strafe_speed(self):
         return 0.0
-        
+
     def _to_numpy_internal(self):
         return np.array([
             self.hp / 100., self.max_hp / 100., self.mana / 100., self.max_mana / 100.,
