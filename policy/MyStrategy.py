@@ -32,16 +32,6 @@ except ImportError:
     print "ZMQ is not availabe"
     zmq = None
 
-debug = None
-try:
-    from debug_client import DebugClient
-except:
-    debug = None
-else:
-    pass
-    debug = DebugClient()
-
-
 MAX_TARGETS_NUM = 5
 
 
@@ -256,6 +246,15 @@ class MyStrategy:
         else:
             self.sock = None
 
+        self.debug = None
+        if args and args.debug:
+            try:
+                from debug_client import DebugClient
+                self.debug = DebugClient()
+            except:
+                pass
+
+
         self.listener = None
         if args and args.policy == 'q' and args.vars_socket:
             self.policy = QPolicy(NUM_ACTIONS, args.dropout)
@@ -360,9 +359,9 @@ class MyStrategy:
         @type game: Game
         @type move: Move
         """
-        if debug:
-            debug.post()
-            debug.start()
+        if self.debug:
+            self.debug.post()
+            self.debug.start()
         HistoricStateTracker.GetInstance(me, world).AddInvisibleBuildings(me, world, game)
         if world.tick_index < 10:
             l = self.GetLane(me)
@@ -382,7 +381,7 @@ class MyStrategy:
             self.fireball_action = Actions.FireballAction(game.map_size, self.lane)
 
         state = None
-        state = State.WorldState(me, world, game, self.lane, self.last_state, debug)
+        state = State.WorldState(me, world, game, self.lane, self.last_state, self.debug)
         noop = Actions.NoOpAction()
 
         targets = [enemy.unit for enemy in state.enemy_states
@@ -418,6 +417,5 @@ class MyStrategy:
         self.last_action = a
         self.initialized = True
         self.last_tick = world.tick_index
-        if debug:
-            debug.stop()
-        # print world.tick_index
+        if self.debug:
+            self.debug.stop()

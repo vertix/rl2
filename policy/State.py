@@ -389,10 +389,10 @@ class LivingUnitState(State):
             self.rel_position[0] / 1000., self.rel_position[1] / 1000.,
             self.rel_speed[0], self.rel_speed[1], self.rel_angle,
             self.dist / 1000., self.attack_range / 1000., self.vision_range / 1000.,
-            self.cooldown_ticks / 1000.,  # 19
+            self.cooldown_ticks / 100.,  # 19
             self.is_on_top_lane, self.is_on_middle_lane, self.is_on_bottom_lane,
-            self.total_cooldown_ticks / 1000., self.aggro_range / 100.,
-            self.expected_overtime_damage / 1000.,
+            self.total_cooldown_ticks / 100., self.aggro_range / 100.,
+            self.expected_overtime_damage / 10.,
             self.frost_bolt / 10., self.frost_bolt_cooldown / 10.,
             self.fireball / 10., self.fireball_cooldown / 10.,
             self.missile / 10., self.missile_cooldown / 10.,
@@ -745,9 +745,22 @@ class MyState(WizardState):
         return self.lane
 
     def _to_numpy_internal(self):
-        return np.hstack([super(MyState, self)._to_numpy_internal(),
-                          np.array([self.aggro / 10., self.current_lane, self.max_fireball_damage])])
-
+        return np.array([
+            self.hp / 100., self.max_hp / 100., self.mana / 100., self.max_mana / 100.,
+            self.position[0] / 1000., self.position[1] / 1000.,
+            self.speed[0], self.speed[1],
+            self.max_speed, self.angle,
+            self.attack_range / 1000., self.vision_range / 1000.,
+            self.cooldown_ticks / 100.,  # 19
+            self.is_on_top_lane, self.is_on_middle_lane, self.is_on_bottom_lane,
+            self.total_cooldown_ticks / 100., self.aggro_range / 100.,
+            self.expected_overtime_damage / 10.,
+            self.frost_bolt / 10., self.frost_bolt_cooldown / 10.,
+            self.fireball / 10., self.fireball_cooldown / 10.,
+            self.missile / 10., self.missile_cooldown / 10.,
+            self.staff, self.hp_regen, self.forward_speed, self.strafe_speed,
+            self.aggro / 10., self.current_lane, self.max_fireball_damage
+        ])
 
 MAX_ENEMIES = 10
 MAX_FRIENDS = 10
@@ -789,7 +802,6 @@ class WorldState(State):
         states += [MinionState(m, me, game, world, self) for m in world.minions]
         states += [BuildingState(b, me, game, world, dbg) for b in world.buildings]
 
-        # TODO(vertix): Add to state
         for b in world.buildings:
             if b.type == BuildingType.FACTION_BASE and b.faction != me.faction:
                 self.enemy_base_hp = b.life
@@ -814,7 +826,7 @@ class WorldState(State):
         return (self.world.tick_count - self.world.tick_index)
 
     def _to_numpy_internal(self):
-        return np.hstack([self.my_state.to_numpy()] +  # 36
+        return np.hstack([self.my_state.to_numpy()] +
                          [s.to_numpy() for s in self.enemy_states] +
                          [np.zeros(LIVING_UNIT_STATE_SIZE)] * (MAX_ENEMIES - len(self.enemy_states)) +
                          [s.to_numpy() for s in self.friend_states] +
