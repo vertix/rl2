@@ -138,11 +138,11 @@ def PickBestFireballTarget(me, state):
             c = Point.FromUnit(me) + (c - me) * (me.cast_range / d)
             d = c.GetDistanceTo(me)
         state.dbg_circle(PlainCircle(c, 3), GREEN)
-        res = TargetAndDamage(c)
         if d < state.game.fireball_explosion_min_damage_range + me.radius + mes.max_speed + MACRO_EPSILON:
             c = Point.FromUnit(me) + (c - me) * ((
                 state.game.fireball_explosion_min_damage_range + me.radius + mes.max_speed + MACRO_EPSILON) / d)
             d = c.GetDistanceTo(me)
+        res = TargetAndDamage(c)
         for t in targets:
             damage = GetFireballDamage(mes, t, c, state)
             if damage > 0:
@@ -251,7 +251,7 @@ def BuildTargets(me, radius, state):
     return [t for t in BuildEnemies(me, radius, state) if IsValidTarget(me, t, state)]
 
 def CanDodge(w, ps, state, projectile_radius_modifier=-MACRO_EPSILON, fine_tune=True):
-    # debug_string = ''
+    debug_string = ''
     wp = Point.FromUnit(w)
     if (wp.GetDistanceToSegment(ps.center_line) >
         ps.max_radius + projectile_radius_modifier + w.radius):
@@ -264,26 +264,26 @@ def CanDodge(w, ps, state, projectile_radius_modifier=-MACRO_EPSILON, fine_tune=
     state.dbg_line(ps.border2.p1, ps.border2.p2)
     time = d / ps.speed
     distance_to_circle = INFINITY
-    # debug_string += 'w_to_start: %.0f\n' % wp.GetDistanceTo(ps.start)
-    # debug_string += 'start_to_end: %.0f\n' % ps.start.GetDistanceTo(ps.end)
+    debug_string += 'w_to_start: %.0f\n' % wp.GetDistanceTo(ps.start)
+    debug_string += 'start_to_end: %.0f\n' % ps.start.GetDistanceTo(ps.end)
     if ((ps.end - ps.start).ScalarMul(wp - ps.start) > 0
         and (ps.end - ps.start).ScalarMul(wp - ps.end) > 0):
         distance_to_circle = (ps.max_radius + projectile_radius_modifier +
                               w.radius - wp.GetDistanceTo(ps.end))
         
-    # debug_string += 'd_to_circle: %.0f\n' % distance_to_circle
-    # debug_string += 'd_to_border1: %.0f\n' % wp.GetDistanceToSegment(ps.border1)
-    # debug_string += 'd_to_border2: %.0f\n' % wp.GetDistanceToSegment(ps.border2)
+    debug_string += 'd_to_circle: %.0f\n' % distance_to_circle
+    debug_string += 'd_to_border1: %.0f\n' % wp.GetDistanceToSegment(ps.border1)
+    debug_string += 'd_to_border2: %.0f\n' % wp.GetDistanceToSegment(ps.border2)
 
     min_d = min(wp.GetDistanceToSegment(ps.border1) + projectile_radius_modifier,
                 wp.GetDistanceToSegment(ps.border2) + projectile_radius_modifier,
                 distance_to_circle)
-    # debug_string += 'min_d:\n%.1f\ntime * max_speed:\n%.1f*%.1f=%.1f' % (
-    #                    min_d,
-    #                    time,
-    #                    state.index[w.id].max_speed,
-    #                    time * state.index[w.id].max_speed)
-    # state.dbg_text(w, debug_string, RED)
+    debug_string += 'min_d:\n%.1f\ntime * max_speed:\n%.1f*%.1f=%.1f' % (
+                       min_d,
+                       time,
+                       state.index[w.id].max_speed,
+                       time * state.index[w.id].max_speed)
+    state.dbg_text(w, debug_string, RED)
     if min_d > time * state.index[w.id].max_speed:
         return False
     if fine_tune:
@@ -310,12 +310,12 @@ def CanHitWizard(me, w, action, state, strict=False):
         if abs(da) > mes.max_rotation_speed:
             da = da / abs(da) * mes.max_rotation_speed
             speed = Point(1.0, 0.0).Rotate(me.angle + da)
-    fake_p = Projectile(id=-me.id, x=me.x, y=me.y, speed_x=speed.x, speed_y=speed.y,
+    fake_p = Projectile(id=-me.id-1, x=me.x, y=me.y, speed_x=speed.x, speed_y=speed.y,
         angle=speed.GetAngle(), faction=me.faction, radius=r, type=t, owner_unit_id=me.id,
         owner_player_id=me.owner_player_id)
     from State import ProjectileState
     ps = ProjectileState(p=fake_p, me=me, game=state.game,
-                         world=state.world, last_state=state, dbg=state.dbg)
+                         world=state.world, state=state, dbg=state.dbg)
     return not CanDodge(w, ps, state)
 
 def PickReachableTarget(me, cast_range, action, state, radius=MAX_RANGE, lane=None):

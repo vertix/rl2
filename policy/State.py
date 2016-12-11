@@ -97,8 +97,9 @@ class TreeState(State):
 
 
 class ProjectileState(State):
-    def __init__(self, p, me, game, world, last_state, dbg):
+    def __init__(self, p, me, game, world, state, dbg):
         super(ProjectileState, self).__init__(p, me, dbg)
+        last_state = state.last_state
         self.p = self.unit = p
         self.dots = 0.0
         self.game = game
@@ -112,14 +113,20 @@ class ProjectileState(State):
             self.border2 = old_p.border2
             self.center_line = old_p.center_line
             return
+        need_to_subtract = False
         if p.owner_unit_id in last_state.index:
             owner = last_state.index[p.owner_unit_id]
+        elif p.owner_unit_id in state.last_seen:
+            owner = state.last_seen[p.owner_unit_id]
+            need_to_subtract = True
         else:
             self.expected_end = Point.FromUnit(self.unit)
             self.min_damage = self.max_damage = 0.0
             self.expected_speed = math.hypot(p.speed_x, p.speed_y)
             self.border1 = self.border2 = self.center_line = Segment(self.start, self.end)
             return
+        if p.id < 0:
+            need_to_subtract = False
             
         if self.p.type == ProjectileType.FIREBALL:
             self.expected_speed = self.game.fireball_speed
@@ -141,7 +148,9 @@ class ProjectileState(State):
         cast_range = game.fetish_blowdart_attack_range
         if self.p.type != ProjectileType.DART:
             cast_range = owner.unit.cast_range
-        start_point = Point.FromUnit(owner.unit)
+        start_point = Point.FromUnit(p)
+        if need_to_subtract:
+            start_point -= (speed * self.expected_speed)
         self.expected_end = start_point + speed * cast_range
         for t in world.trees:
             tp = Point.FromUnit(t)
@@ -766,8 +775,11 @@ class WorldState(State):
             last_state.last_state = None
             self.last_state = last_state
             self.enemy_base_hp = self.last_state.enemy_base_hp
+            self.last_seen = last_state.last_seen
+            last_state.last_seen = None
         else:
             self.enemy_base_hp = 1000
+            self.last_seen = {}
 
         self.world = world
         clean_world(me, world)
@@ -776,31 +788,40 @@ class WorldState(State):
         for f in [Faction.ACADEMY, Faction.RENEGADES, Faction.NEUTRAL]:
             self.minion_targets[f] = BuildMinionTargets(f, world)
 
+        self.index = {}
         self.tree_states = [TreeState(t, me, dbg) for t in world.trees]
-        self.projectile_states = [ProjectileState(p, me, game, world, last_state, dbg) for p in world.projectiles]
+        states = []
+        for w in world.wizards:
+            if w != me:
+                ws = WizardState(w, me, game, world, dbg)
+                states.append(ws)
+                self.index[w.id] = ws
+        self.projectile_states = [ProjectileState(p, me, game, world, self, dbg) for p in world.projectiles]
 
-        states = [WizardState(w, me, game, world, dbg) for w in world.wizards if w != me]
-        states += [MinionState(m, me, game, world, self) for m in world.minions]
-        states += [BuildingState(b, me, game, world, dbg) for b in world.buildings]
-
+        for s in ([MinionState(m, me, game, world, self) for m in world.minions] +
+                  [BuildingState(b, me, game, world, dbg) for b in world.buildings]):
+            states.append(s)
+            self.index[s.unit.id] = s
         # TODO(vertix): Add to state
         for b in world.buildings:
             if b.type == BuildingType.FACTION_BASE and b.faction != me.faction:
                 self.enemy_base_hp = b.life
 
         states = sorted(states, key=lambda x: x.dist)
-        self.index = {}
-        for s in itertools.chain(states, self.tree_states, self.projectile_states):
+        for s in itertools.chain(self.tree_states, self.projectile_states):
             self.index[s.unit.id] = s
+        for w in world.wizards:
+            if w != me:
+                self.last_seen[w.id] = self.index[w.id]
 
         self.my_state = MyState(me, game, world, lane, self)
 
         self.enemy_states = [s for s in states if s.enemy][:MAX_ENEMIES]
-        for s in self.enemy_states:
-            assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
+        # for s in self.enemy_states:
+        #     assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
         self.friend_states = [s for s in states if not s.enemy][:MAX_FRIENDS]
-        for s in self.friend_states:
-            assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
+        # for s in self.friend_states:
+        #     assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
 
 
     @property
