@@ -1,3 +1,4 @@
+from collections import namedtuple
 from math import pi
 from math import hypot
 from math import acos
@@ -20,7 +21,7 @@ from Colors import GREEN
 
 EPSILON = 1E-4
 MACRO_EPSILON = 2
-MAX_OBSTACLES = 10
+MAX_OBSTACLES = 8
 MAX_TREES = 3
 INFINITY = 1e6
 TICKS_TO_ACCOUNT_FOR = 10
@@ -163,6 +164,14 @@ class Line(object):
     
     def Normal(self):
         return Point(self.a, self.b) * (1.0 / sqrt(self.sq_norm))
+    
+    def IntersectWithCircle(self, c):
+        # Ax + By + C = 0
+        # (x - c.x) ^ 2 + (y - c.y) ^ 2 = c.r ^ 2
+        if c.p.GetDistanceToLine(self) > c.radius - EPSILON:
+            return []
+        a = acos(c.p.GetDistanceToLine(self) / c.radius)
+        return [self.Normal().Rotate(a) * c.radius + c, self.Normal().Rotate(-a) * c.radius + c]
         
     def __str__(self):
         return '(%.6f*x + %.6f*y + %.6f = 0)' % (self.a, self.b, self.c)
@@ -185,13 +194,17 @@ class Point(object):
     def FromUnit(cls, u):
         return cls(u.x, u.y)
     
-    def ProjectToLine(self, l):
+    def ProjectToLine(self, l, additional_shift=0):
         #     ax + by + c = 0
         #     x = x0 + at
         #     y = y0 + bt
         #     ax0 + aat + by0 + bbt + c = 0
         #     t = (-ax0 - by0 - c) / (aa + bb)
         t = (-l.a * self.x - l.b + self.y - l.c) / l.sq_norm
+        if t < 0:
+            t -= additional_shift / l.sq_norm
+        else:
+            t += additional_shift / l.sq_norm
         return Point(self.x + t * l.a, self.y + t * l.b)
 
     def Rotate(self, a):
@@ -336,7 +349,6 @@ def SegmentClearFromHardObstacles(s, obstacles, soft_obstacles, state):
         if SegmentCrossesCircle(s, o):
             if o.is_tree:
                 obs.append((o.id, o))
-                state.dbg_text(o, o.id, RED)
             else:
                 return False
     obs.sort(key=lambda x: s.p1.GetSqDistanceTo(x[1]))
@@ -367,6 +379,28 @@ def IntersectCircles(c1, c2):
         
     return ([p1, p2], [((p1 - c1p).GetAngle(), (p2 - c1p).GetAngle()), 
                        ((p1 - c2p).GetAngle(), (p2 - c2p).GetAngle())])
+
+def IntersectSegments(s1, s2):
+    if s1.l.sq_norm < EPSILON:
+        return None
+    if s2.l.sq_norm < EPSILON:
+        return None
+    # A1x + B1y + C1 = 0
+    # A2x + B2y + C2 = 0
+    # d = A1B2 - A2B1
+    # x = (-C1 * B2 + C2 * B1) / d
+    # y = (A1 * -C2 + A2 * C1) / d
+    d = s1.l.a * s2.l.b - s2.l.a * s1.l.b
+    if abs(d) < EPSILON:
+        return None
+    ans = Point((s2.l.c * s1.l.b - s1.l.c * s2.l.b) / d,
+                (s1.l.c * s2.l.a - s2.l.c * s1.l.a) / d)
+    if ((s1.p2 - s1.p1).ScalarMul(ans - s1.p1) > EPSILON and
+        (s1.p1 - s1.p2).ScalarMul(ans - s1.p2) > EPSILON and
+        (s2.p2 - s2.p1).ScalarMul(ans - s2.p1) > EPSILON and
+        (s2.p1 - s2.p2).ScalarMul(ans - s2.p2) > EPSILON):
+        return ans
+    return None
                        
 # a1, a2 - starting and ending angles for arc, i1 and i2 - corresponding point numbers,
 # returns [(-pi <= alpha < pi, type, point_no)...],
@@ -558,11 +592,6 @@ def FindOptimalPaths(me, units, state):
         # leave just list of point numbers
         points_per_unit[unit_index] = [k for _, __, k in p if k != -1]
     
-    for p_id, edges in enumerate(graph):
-        for e in edges:
-            state.dbg_line(points[p_id], points[e.v], RED if e.type == Edge.ARC else GREEN)
-                
-        
     optimal_distances, prev = Dijkstra(graph)
     return (points, prev, optimal_distances, points_per_unit)
     
@@ -666,8 +695,49 @@ def ProjectileWillHit(ps, t):
         return False
     return (Point.FromUnit(t).GetSqDistanceToSegment(Segment(ps.start, ps.end)) <
         (t.radius + ps.min_radius) * (t.radius + ps.min_radius))
+        
+def GetMaxSpeedTowardsAngle(mes, angle):
+    if angle > pi / 2:
+        return mes.strafe_speed
+    # hypot(strafe_speed / max_strafe_speed, speed / max_speed) = 1
+    speed = Point(1, 0).Rotate(angle)
+    return 1 / hypot(speed.x / mes.forward_speed, speed.y / mes.strafe_speed)
 
-def PickDodgeDirection(me, ps, state):
+class DirectionAndTime(object):
+    def __init__(self, mes, direction):
+        self.direction = direction
+        me = mes.unit
+        angle = abs(me.get_angle_to_unit(direction))
+        d = me.get_distance_to_unit(direction)
+        sum_time = 0.0
+        if angle > pi/2 + EPSILON:
+            time = (angle - pi/2) / mes.max_rotation_speed
+            max_reduction = time * mes.strafe_speed
+            if d < max_reduction + EPSILON:
+                self.time = d / mes.strafe_speed
+                return
+            d -= max_reduction
+            sum_time += time
+        if angle > EPSILON:
+            time = angle / mes.max_rotation_speed
+            # linear interpolation is a simplification
+            current_speed = GetMaxSpeedTowardsAngle(mes, angle)
+            max_reduction = (current_speed + mes.forward_speed) / 2.0 * time
+            if d < max_reduction + EPSILON:
+                # simplify to linear accelerated motion
+                # a = (mes.forward_speed - current_speed) / time
+                # d = a^2*x / 2
+                # x = 2 * d / a^2
+                a = (mes.forward_speed - current_speed) / time
+                self.time = sum_time + 2 * d / a / a
+                return
+            d -= max_reduction
+            sum_time += time
+        sum_time += d / mes.forward_speed
+        self.time = sum_time
+
+def PickDodgeDirectionAndTime(me, ps, state, extra_space_required=MACRO_EPSILON):
+    mes = state.index[me.id]
     psp = Point.FromUnit(ps.end)
     candidates = []
     mep = Point.FromUnit(me)
@@ -675,35 +745,43 @@ def PickDodgeDirection(me, ps, state):
     d = psp.GetDistanceTo(me)
     if d < EPSILON:
         v = psp - ps.start
-    candidates.append(mep + v * ((ps.max_radius + me.radius - d + MACRO_EPSILON) / v.Norm()))
-    candidates.append(mep.ProjectToLine(ps.border1.l))
-    candidates.append(mep.ProjectToLine(ps.border2.l))
+    candidates.append(mep + v * ((ps.max_radius + me.radius - d + extra_space_required) / v.Norm()))
+    candidates.append(mep.ProjectToLine(ps.border1.l, extra_space_required))
+    candidates.append(mep.ProjectToLine(ps.border2.l, extra_space_required))
     obstacles = []
     for u in state.world.trees + state.world.wizards + state.world.buildings + state.world.minions:
-        if psp.GetSqDistanceTo(u) < ps.max_radius + u.radius + me.radius + MACRO_EPSILON:
+        if psp.GetSqDistanceTo(u) < ps.max_radius + u.radius + me.radius + extra_space_required:
             obstacles.append(u)
             # ([p1, p2], [(a1, a2), (b1, b2)]) or None, where pX - points, aX - corresponding
             # angles on c1, bX - corresponding angles on c2 intersection goes from a1 to a2 in positive
             # direction on c1 and in negative on c2.
             intersections = IntersectCircles(
-                PlainCircle(psp, ps.max_radius + me.radius + MACRO_EPSILON),
+                PlainCircle(psp, ps.max_radius + me.radius + extra_space_required),
                 PlainCircle(u, u.radius + me.radius))
             if intersections:
                 candidates.extend(intersections[0])
-        if ps.start.GetSqDistanceTo(u) < ps.max_radius + u.radius + me.radius + MACRO_EPSILON:
+        if ps.start.GetDistanceTo(u) < ps.max_radius + u.radius + me.radius + extra_space_required:
             obstacles.append(u)
-    shortest = INFINITY
     best = None
     for c in candidates:
+        if (c.GetDistanceToSegment(ps.center_line) <
+            ps.max_radius + me.radius + extra_space_required):
+            continue
         good = True
         for o in obstacles:
             if SegmentCrossesCircle(Segment(mep, c), o):
                 good = False
                 break
-        sqd = mep.GetSqDistanceTo(c)
-        if good and shortest > sqd:
-            shortest = sqd
-            best = c
+        if good:
+            dt = DirectionAndTime(mes, c)
+            if best is None or dt.time < best.time:
+                best = dt
+    if best is not None:
+        projectile_distance = min(ps.end.GetDistanceTo(ps.start),
+                                  best.direction.ProjectToLine(ps.center_line.l).GetDistanceTo(
+                                      ps.start))
+        if best.time > projectile_distance / ps.speed:
+            return None
     return best
             
             

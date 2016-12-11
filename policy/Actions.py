@@ -8,12 +8,14 @@ from model.Unit import Unit
 from model.Message import Message
 from model.SkillType import SkillType
 from model.Building import Building
+from model.Projectile import Projectile
+from model.ProjectileType import ProjectileType
 from Colors import RED
 from Geometry import Point
 from Geometry import HasMeleeTarget
 from Geometry import TargetInRangeWithAllowance
 from Geometry import ProjectileWillHit
-from Geometry import PickDodgeDirection
+from Geometry import PickDodgeDirectionAndTime
 from Geometry import PlainCircle
 from CachedGeometry import Cache
 from Analysis import GetAggro
@@ -36,6 +38,8 @@ TARGET_COOLDOWN = 20
 MISSILE_DISTANCE_ERROR = 10
 MARGIN = 300
 INFINITY=1e6
+EPSILON = 1e-5
+MACRO_EPSILON = 1
 last_x = -1
 last_y = -1
 
@@ -111,16 +115,14 @@ class MoveAction(object):
         divisor = 1.0
         if (abs(vd) > d) and (abs(d) > 1e-3):
             divisor = abs(vd / d)
-        if abs(move.speed) > mes.forward_speed:
-            divisor = max(divisor, abs(move.speed / mes.forward_speed))
-        if abs(move.strafe_speed) > mes.strafe_speed:
-            divisor = max(divisor, abs(move.strafe_speed / mes.strafe_speed))
+        divisor = max(divisor, math.hypot(move.speed / mes.forward_speed,
+                                          move.strafe_speed / mes.strafe_speed))
         move.speed /= divisor
         move.strafe_speed /= divisor
         # if abs(move.speed) > mes.forward_speed:
         #     import pdb; pdb.set_trace()
-        state.dbg_text(me, 'd:%.0f\ns:%.1f\nss:%.1f\nx:%.0f\ny:%.0f\nangle:%.1frel_angle:%.1f' % (
-            d, move.speed, move.strafe_speed, me.x, me.y, me.angle, angle))
+        # state.dbg_text(me, 'd:%.0f\ns:%.1f\nss:%.1f\nx:%.0f\ny:%.0f\nangle:%.1frel_angle:%.1f' % (
+        #     d, move.speed, move.strafe_speed, me.x, me.y, me.angle, angle))
         new_p = Point(move.speed, move.strafe_speed).Rotate(me.angle) + me
         if not self.dodging:
             for p in state.world.projectiles:
@@ -200,9 +202,9 @@ class MoveAction(object):
     def MaybeLearnSkills(self, me, move):
         if self.LearnFireball(me, move):
             return
-        if self.LearnDamage(me, move):
-            return
         if self.LearnRange(me, move):
+            return
+        if self.LearnDamage(me, move):
             return
 
     def MaybeDodge(self, move, state):
@@ -210,12 +212,12 @@ class MoveAction(object):
             ps = state.index[p.id]
             me = state.my_state.unit
             if (ProjectileWillHit(ps, me) and
-                CanDodge(me, ps, state)):
-                t = PickDodgeDirection(me, ps, state)
+                CanDodge(me, ps, state, MACRO_EPSILON, fine_tune=False)):
+                t = PickDodgeDirectionAndTime(me, ps, state, MACRO_EPSILON)
                 if t is not None:
                     self.dodging = True
-                    state.dbg_line(me, t, RED)
-                    self.RushToTarget(me, t, move, state)
+                    state.dbg_line(me, t.direction, RED)
+                    self.RushToTarget(me, t.direction, move, state)
                     return True
         return False
         
@@ -246,12 +248,7 @@ class MoveAction(object):
         #     import pdb; pdb.set_trace()
         self.overridden_target = FindFirstUnitByIds(t_ids, state)
 
-        max_vector = Point(mes.forward_speed, mes.strafe_speed)
-        optimal_angle = max_vector.GetAngle()
-
-        options = [angle - optimal_angle, angle + optimal_angle]
-        target_angle = options[0] if abs(options[0]) < abs(options[1]) else options[1]
-        move.turn = target_angle
+        move.turn = angle
         return None
 
     def MakeFleeMove(self, me, move, state):
@@ -280,10 +277,6 @@ class MoveAction(object):
             isinstance(target, Building)) and (
                 target.life - ts.expected_overtime_damage > 
                 ts.get_effective_damage_to_me(mes.missile)):
-            if (mes.fireball > 0 and mes.fireball_cooldown == 0):
-                return (ActionType.FIREBALL, 
-                        mes.fireball_cooldown,
-                        state.game.fireball_radius)
             if (mes.frost_bolt > 0 and mes.frost_bolt_cooldown == 0):
                 return (ActionType.FROST_BOLT, 
                         mes.frost_bolt_cooldown,
@@ -338,6 +331,10 @@ class MoveAction(object):
        
         if abs(angle_to_target) > abs(math.atan2(t.radius, distance)):
             move.action = ActionType.NONE
+        if mes.fireball > 0 and me.mana < state.game.fireball_manacost:
+            move.action = ActionType.NONE
+        if mes.frost_bolt > 0 and me.mana < state.game.frost_bolt_manacost:
+            move.action = ActionType.NONE
         
         
         if move.action == action:
@@ -356,6 +353,33 @@ class MoveAction(object):
                 if not self.dodging and not HaveEnoughTimeToTurn(
                     me, angle_to_target, melee_target, state, ActionType.STAFF):
                     move.turn = angle_to_target
+
+
+class FleeInTerrorAction(MoveAction):
+    def __init__(self, map_size, lane, safe_distance=30):
+        MoveAction.__init__(self, map_size, lane)
+        self.safe_distance = safe_distance
+
+    @property
+    def name(self):
+        return "FLEE_IN_TERROR"
+
+    def Act(self, me, state):
+        move = Move()
+        self.dodging = self.MaybeDodge(move, state)
+        aggro = GetAggro(me, self.safe_distance, state)
+        if aggro > 0:
+            # print 'flee with aggro'
+            if not self.dodging:
+                self.MakeFleeMove(me, move, state)
+        else:
+            # print 'rush'
+            if not self.dodging:
+                self.MakeAdvanceMove(me, move, state)
+
+        self.MaybeSetLanes(me, move)
+        self.MaybeLearnSkills(me, move)  
+        return move
 
 
 class FleeAction(MoveAction):
@@ -436,6 +460,44 @@ class RangedAttack(MoveAction):
         self.MakeMissileMove(me, move, state, self.target)
         self.MaybeSetLanes(me, move)
         self.MaybeLearnSkills(me, move)
+        return move
+
+
+class FireballAction(MoveAction):
+    def __init__(self, map_size, lane):
+        MoveAction.__init__(self, map_size, lane)
+
+    @property
+    def name(self):
+        return "FIREBALL ATTACK"
+
+    def Act(self, me, state):
+        move = Move()
+        self.dodging = self.MaybeDodge(move, state)
+        t = state.my_state.fireball_target
+        angle = me.get_angle_to_unit(t)
+        if not self.dodging:
+            self.RushToTarget(me, t, move, state)
+        if abs(angle) < state.game.staff_sector / 2:
+            move.action = ActionType.FIREBALL
+            move.cast_angle = angle
+            move.min_cast_distance = move.max_cast_distance = t.GetDistanceTo(me)
+        elif not self.dodging:
+            move.turn = angle
+        state.dbg_line(me, t)
+        speed = t - me
+        if move.action == ActionType.FIREBALL:
+            fake_p = Projectile(id=-me.id, x=me.x, y=me.y, speed_x=speed.x, speed_y=speed.y,
+                angle=speed.GetAngle(), faction=me.faction, radius=state.game.fireball_radius, 
+                type=ProjectileType.FIREBALL, owner_unit_id=me.id,
+                owner_player_id=me.owner_player_id)
+            from State import ProjectileState
+            ps = ProjectileState(p=fake_p, me=me, game=state.game,
+                                 world=state.world, last_state=state, dbg=state.dbg)
+            if ps.end.GetSqDistanceTo(me) < t.GetSqDistanceTo(me) - EPSILON:
+                move.action = ActionType.MAGIC_MISSILE
+        self.MaybeSetLanes(me, move)      
+        self.MaybeLearnSkills(me, move)  
         return move
 
 
