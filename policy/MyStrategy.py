@@ -32,16 +32,6 @@ except ImportError:
     print "ZMQ is not availabe"
     zmq = None
 
-debug = None
-try:
-    from debug_client import DebugClient
-except:
-    debug = None
-else:
-    pass
-    debug = DebugClient()
-
-
 MAX_TARGETS_NUM = 5
 
 
@@ -49,12 +39,22 @@ def ReLu(x):
     return np.maximum(x, 0)
 
 
-def BatchNorm(state, network_vars, key):
-    eps = 0.001
+def Elu(x):
+    return np.where(x < 0, np.exp(x) - 1, x)
+
+def BatchNorm(state, network_vars, key, shift=True, eps=0.001):
     inv = 1.0 / np.sqrt(network_vars[key + '/moving_variance:0'] + eps)
 
-    return state * inv + (network_vars[key + '/beta:0'] - network_vars[key + '/moving_mean:0'] * inv)
+    if shift:
+        return state * inv + (network_vars[key + '/beta:0'] - network_vars[key + '/moving_mean:0'] * inv)
+    else:
+        return state * inv + (-network_vars[key + '/moving_mean:0'] * inv)
 
+def Normalize(state, mean, std):
+    return (state - mean) / std
+
+def Dropout(x, keep_prob):
+    return x * np.random.binomial(1, keep_prob, x.shape) / keep_prob
 
 def Softmax(state):
     state -= np.max(state)
@@ -63,19 +63,29 @@ def Softmax(state):
 
 
 class QFunction(object):
-    def __init__(self, network_vars):
+    def __init__(self, network_vars, keep_prob):
         self.vars = network_vars
+        self.keep_prob = keep_prob
 
     def Q(self, state):
+        state = Normalize(state, self.vars['mean:0'], self.vars['std:0'])
+        # state = BatchNorm(state, self.vars, 'model/norm', shift=False)
+
         state = np.matmul(state, self.vars['model/hidden1/weights:0'])
         state += self.vars['model/hidden1/biases:0']
         # state = BatchNorm(state, self.vars, 'model/hidden1/BatchNorm')
-        state = ReLu(state)
+        state = Elu(state)
+
+        if self.keep_prob < 1.:
+            state = Dropout(state, self.keep_prob)
 
         state = np.matmul(state, self.vars['model/hidden2/weights:0'])
         state += self.vars['model/hidden2/biases:0']
         # state = BatchNorm(state, self.vars, 'model/hidden2/BatchNorm')
-        state = ReLu(state)
+        state = Elu(state)
+
+        if self.keep_prob < 1.:
+            state = Dropout(state, self.keep_prob)
 
         # value = np.matmul(state, self.vars['model/val_hid/weights:0'])
         # value += self.vars['model/val_hid/biases:0']
@@ -91,7 +101,8 @@ class QFunction(object):
         adv = np.matmul(state, self.vars['model/advantage/weights:0'])
         adv += self.vars['model/advantage/biases:0']
 
-        return value + (adv - adv.mean())
+        return value + (adv - adv.mean(keepdims=True))
+        # return value + (adv - adv.mean(1, keepdims=True))
 
     def Select(self, state):
         value = self.Q(state.to_numpy())
@@ -168,13 +179,14 @@ class NNPolicy(object):
 
 
 class QPolicy(object):
-    def __init__(self, max_actions):
+    def __init__(self, max_actions, keep_prob=1.0):
         self.q = None
         self.steps = 0
         self.max_actions = max_actions
+        self.keep_prob = keep_prob
 
     def UpdateVars(self, new_vars):
-        self.q = QFunction(new_vars)
+        self.q = QFunction(new_vars, self.keep_prob)
 
     def Act(self, state):
         epsilon = 0.5 / (1 + self.steps / 1000.)
@@ -217,7 +229,7 @@ class DefaultPolicy(object):
         pass
 
 
-NUM_ACTIONS = 2 + MAX_TARGETS_NUM
+NUM_ACTIONS = 4 + MAX_TARGETS_NUM
 LANES = [LaneType.TOP, LaneType.MIDDLE, LaneType.BOTTOM]
 GAMMA = 0.995
 Q_N_STEPS = 20
@@ -234,9 +246,18 @@ class MyStrategy:
         else:
             self.sock = None
 
+        self.debug = None
+        if args and args.debug:
+            try:
+                from debug_client import DebugClient
+                self.debug = DebugClient()
+            except:
+                pass
+
+
         self.listener = None
         if args and args.policy == 'q' and args.vars_socket:
-            self.policy = QPolicy(NUM_ACTIONS)
+            self.policy = QPolicy(NUM_ACTIONS, args.dropout)
         elif args and args.policy == 'nn':
             # with open('network') as f:
                 # cPickle.load(f)
@@ -338,9 +359,9 @@ class MyStrategy:
         @type game: Game
         @type move: Move
         """
-        if debug:
-            debug.post()
-            debug.start()
+        if self.debug:
+            self.debug.post()
+            self.debug.start()
         HistoricStateTracker.GetInstance(me, world).AddInvisibleBuildings(me, world, game)
         if world.tick_index < 10:
             l = self.GetLane(me)
@@ -360,13 +381,14 @@ class MyStrategy:
             self.fireball_action = Actions.FireballAction(game.map_size, self.lane)
 
         state = None
-        state = State.WorldState(me, world, game, self.lane, self.last_state, debug)
+        state = State.WorldState(me, world, game, self.lane, self.last_state, self.debug)
         noop = Actions.NoOpAction()
 
         targets = [enemy.unit for enemy in state.enemy_states
                    if enemy.dist < 1000][:MAX_TARGETS_NUM]
         actions = ([self.flee_in_terror_action, self.flee_action,
-                    self.fireball_action, self.advance_action] +
+                    self.fireball_action if state.my_state.fireball_target else noop,
+                    self.advance_action] +
                    [Actions.MeleeAttack(game.map_size, self.lane, t) for t in targets] +
                    [noop] * (MAX_TARGETS_NUM - len(targets)))
 
@@ -396,6 +418,5 @@ class MyStrategy:
         self.last_action = a
         self.initialized = True
         self.last_tick = world.tick_index
-        if debug:
-            debug.stop()
-        # print world.tick_index
+        if self.debug:
+            self.debug.stop()

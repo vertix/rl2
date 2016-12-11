@@ -18,11 +18,11 @@ class ExperienceBuffer(object):
         if self.ss is None:
             # Initialize
             state_size = len(s)
-            self.ss = np.zeros((state_size, self.buffer_size))
+            self.ss = np.zeros((state_size, self.buffer_size), dtype=np.float32)
             self.aa = np.zeros(self.buffer_size, dtype=np.int16)
-            self.ss1 = np.zeros((state_size, self.buffer_size))
-            self.rr = np.zeros(self.buffer_size)
-            self.gg = np.zeros(self.buffer_size)
+            self.ss1 = np.zeros((state_size, self.buffer_size), dtype=np.float32)
+            self.rr = np.zeros(self.buffer_size, dtype=np.float32)
+            self.gg = np.zeros(self.buffer_size, dtype=np.float32)
 
         cur_index = self.inserted % self.buffer_size
         self.ss[:, cur_index] = s
@@ -90,11 +90,11 @@ class WeightedExperienceBuffer(object):
         if self.ss is None:
             # Initialize
             state_size = s.shape[1]
-            self.ss = np.zeros((state_size, self.buffer_size))
+            self.ss = np.zeros((state_size, self.buffer_size), dtype=np.float32)
             self.aa = np.zeros(self.buffer_size, dtype=np.int16)
-            self.ss1 = np.zeros((state_size, self.buffer_size))
-            self.rr = np.zeros(self.buffer_size)
-            self.gg = np.zeros(self.buffer_size)
+            self.ss1 = np.zeros((state_size, self.buffer_size), dtype=np.float32)
+            self.rr = np.zeros(self.buffer_size, dtype=np.float32)
+            self.gg = np.zeros(self.buffer_size, dtype=np.float32)
 
         indexes = []
         for _ in a:

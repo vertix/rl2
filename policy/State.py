@@ -223,10 +223,11 @@ class ProjectileState(State):
 
     def _to_numpy_internal(self):
         return np.array([
-            self.start.x, self.start.y, self.end.x, self.end.y,
-            self.min_radius, self.max_radius, self.min_direct_damage,
-            self.max_direct_damage, self.overtime_damage, self.speed,
-            self.freeze_time
+            self.start.x / 1000., self.start.y / 1000.,
+            self.end.x  / 1000., self.end.y  / 1000.,
+            self.min_radius, self.max_radius, self.min_direct_damage / 10.,
+            self.max_direct_damage / 10., self.overtime_damage / 10.,
+            self.speed / 10., self.freeze_time  / 10.
         ])
 
 PROJECTILE_STATE_SIZE = 11
@@ -250,7 +251,7 @@ class LivingUnitState(State):
 
     def get_effective_damage_to_me(self, nominal_damage):
         return nominal_damage
-                              
+
     @property
     def hp(self):
         return self.unit.life
@@ -387,18 +388,23 @@ class LivingUnitState(State):
     @property
     def strafe_speed(self):
         return 0.0
-        
+
     def _to_numpy_internal(self):
         return np.array([
-            self.hp, self.max_hp, self.mana, self.max_mana,
-            self.position[0], self.position[1], self.radius, self.speed[0], self.speed[1],
-            self.max_speed, self.angle, self.rel_position[0], self.rel_position[1],
+            self.hp / 100., self.max_hp / 100., self.mana / 100., self.max_mana / 100.,
+            self.position[0] / 1000., self.position[1] / 1000.,
+            self.radius / 10., self.speed[0], self.speed[1],
+            self.max_speed, self.angle,
+            self.rel_position[0] / 1000., self.rel_position[1] / 1000.,
             self.rel_speed[0], self.rel_speed[1], self.rel_angle,
-            self.dist, self.attack_range, self.vision_range, self.cooldown_ticks,
+            self.dist / 1000., self.attack_range / 1000., self.vision_range / 1000.,
+            self.cooldown_ticks / 100.,  # 19
             self.is_on_top_lane, self.is_on_middle_lane, self.is_on_bottom_lane,
-            self.total_cooldown_ticks, self.aggro_range, self.expected_overtime_damage,
-            self.frost_bolt, self.frost_bolt_cooldown, self.fireball,
-            self.fireball_cooldown, self.missile, self.missile_cooldown,
+            self.total_cooldown_ticks / 100., self.aggro_range / 100.,
+            self.expected_overtime_damage / 10.,
+            self.frost_bolt / 10., self.frost_bolt_cooldown / 10.,
+            self.fireball / 10., self.fireball_cooldown / 10.,
+            self.missile / 10., self.missile_cooldown / 10.,
             self.staff, self.hp_regen, self.forward_speed, self.strafe_speed
         ])
 
@@ -419,13 +425,13 @@ class WizardState(LivingUnitState):
             missile_radius = max(missile_radius, game.fireball_explosion_min_damage_range)
         self.effective_range = w.cast_range + missile_radius + me.radius
         self.hastened = StatusType.HASTENED in [st.type for st in w.statuses]
-        
+
         self.handle_improvements(w, game, world)
-        
+
         self.cached_missile_total_cooldown = game.magic_missile_cooldown_ticks
         if SkillType.ADVANCED_MAGIC_MISSILE in self.unit.skills:
             self.cached_missile_total_cooldown = game.wizard_action_cooldown_ticks
-        
+
     def handle_improvements(self, w, game, world):
         haste_aura1 = False
         haste_aura2 = False
@@ -748,9 +754,22 @@ class MyState(WizardState):
         return self.lane
 
     def _to_numpy_internal(self):
-        return np.hstack([super(MyState, self)._to_numpy_internal(),
-                          np.array([self.aggro, self.current_lane, self.max_fireball_damage])])
-
+        return np.array([
+            self.hp / 100., self.max_hp / 100., self.mana / 100., self.max_mana / 100.,
+            self.position[0] / 1000., self.position[1] / 1000.,
+            self.speed[0], self.speed[1],
+            self.max_speed, self.angle,
+            self.attack_range / 1000., self.vision_range / 1000.,
+            self.cooldown_ticks / 100.,  # 19
+            self.is_on_top_lane, self.is_on_middle_lane, self.is_on_bottom_lane,
+            self.total_cooldown_ticks / 100., self.aggro_range / 100.,
+            self.expected_overtime_damage / 10.,
+            self.frost_bolt / 10., self.frost_bolt_cooldown / 10.,
+            self.fireball / 10., self.fireball_cooldown / 10.,
+            self.missile / 10., self.missile_cooldown / 10.,
+            self.staff, self.hp_regen, self.forward_speed, self.strafe_speed,
+            self.aggro / 10., self.current_lane, self.max_fireball_damage
+        ])
 
 MAX_ENEMIES = 10
 MAX_FRIENDS = 10
@@ -826,11 +845,9 @@ class WorldState(State):
 
     @property
     def ticks_until_end(self):
-        """Returns 1 in the beginning of episode and 0 in its end. Computed from ticks"""
-        return self.world.tick_count - self.world.tick_index
+        return (self.world.tick_count - self.world.tick_index)
 
     def _to_numpy_internal(self):
-        # import pdb; pdb.set_trace()
         return np.hstack([self.my_state.to_numpy()] +
                          [s.to_numpy() for s in self.enemy_states] +
                          [np.zeros(LIVING_UNIT_STATE_SIZE)] * (MAX_ENEMIES - len(self.enemy_states)) +
@@ -838,4 +855,4 @@ class WorldState(State):
                          [np.zeros(LIVING_UNIT_STATE_SIZE)] * (MAX_FRIENDS - len(self.friend_states)) +
                          [s.to_numpy() for s in self.projectile_states[:MAX_PROJECTILES]] +
                          [np.zeros(PROJECTILE_STATE_SIZE)] * (MAX_PROJECTILES - len(self.projectile_states)) +
-                         [np.array([self.ticks_until_end])])
+                         [np.array([self.ticks_until_end  / 10000., self.enemy_base_hp / 1000.])])
