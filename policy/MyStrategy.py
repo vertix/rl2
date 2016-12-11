@@ -229,7 +229,7 @@ class DefaultPolicy(object):
         pass
 
 
-NUM_ACTIONS = 2 + MAX_TARGETS_NUM
+NUM_ACTIONS = 4 + MAX_TARGETS_NUM
 LANES = [LaneType.TOP, LaneType.MIDDLE, LaneType.BOTTOM]
 GAMMA = 0.995
 Q_N_STEPS = 20
@@ -387,7 +387,8 @@ class MyStrategy:
         targets = [enemy.unit for enemy in state.enemy_states
                    if enemy.dist < 1000][:MAX_TARGETS_NUM]
         actions = ([self.flee_in_terror_action, self.flee_action,
-                    self.fireball_action, self.advance_action] +
+                    self.fireball_action if state.my_state.fireball_target else noop,
+                    self.advance_action] +
                    [Actions.MeleeAttack(game.map_size, self.lane, t) for t in targets] +
                    [noop] * (MAX_TARGETS_NUM - len(targets)))
 
