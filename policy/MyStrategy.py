@@ -68,36 +68,28 @@ class QFunction(object):
         self.keep_prob = keep_prob
 
     def Q(self, state):
-        state = Normalize(state, self.vars['mean:0'], self.vars['std:0'])
-        # state = BatchNorm(state, self.vars, 'model/norm', shift=False)
+        # state = Normalize(state, self.vars['mean:0'], self.vars['std:0'])
+
+        my_state = state[:32 + 10 * 36]
+        friends = state[32 + 10 * 36: 32 + 20 * 36].reshape((10, -1))
+        friends = np.matmul(friends, self.vars['model/friends/Conv/weights:0'][0, 0, :, :])
+        friends += self.vars['model/friends/Conv/biases:0']
+        friends = Elu(friends)
+        friends = friends.max(0)
+        rest_state = state[32 + 20 * 36:]
+        state = np.concatenate((my_state, friends, rest_state))
 
         state = np.matmul(state, self.vars['model/hidden1/weights:0'])
         state += self.vars['model/hidden1/biases:0']
-        # state = BatchNorm(state, self.vars, 'model/hidden1/BatchNorm')
         state = Elu(state)
-
-        if self.keep_prob < 1.:
-            state = Dropout(state, self.keep_prob)
 
         state = np.matmul(state, self.vars['model/hidden2/weights:0'])
         state += self.vars['model/hidden2/biases:0']
-        # state = BatchNorm(state, self.vars, 'model/hidden2/BatchNorm')
         state = Elu(state)
 
-        if self.keep_prob < 1.:
-            state = Dropout(state, self.keep_prob)
-
-        # value = np.matmul(state, self.vars['model/val_hid/weights:0'])
-        # value += self.vars['model/val_hid/biases:0']
-        # value = BatchNorm(value, self.vars, 'model/val_hid/BatchNorm')
-        # value = ReLu(value)
         value = np.matmul(state, self.vars['model/value/weights:0'])
         value += self.vars['model/value/biases:0']
 
-        # adv = np.matmul(state, self.vars['model/adv_hid/weights:0'])
-        # adv += self.vars['model/adv_hid/biases:0']
-        # adv = BatchNorm(adv, self.vars, 'model/adv_hid/BatchNorm')
-        # adv = ReLu(adv)
         adv = np.matmul(state, self.vars['model/advantage/weights:0'])
         adv += self.vars['model/advantage/biases:0']
 

@@ -751,16 +751,16 @@ class MyState(WizardState):
             self.speed[0], self.speed[1],
             self.max_speed, self.angle,
             self.attack_range / 1000., self.vision_range / 1000.,
-            self.cooldown_ticks / 100.,  # 19
+            self.cooldown_ticks / 100., 
             self.is_on_top_lane, self.is_on_middle_lane, self.is_on_bottom_lane,
             self.total_cooldown_ticks / 100., self.aggro_range / 100.,
             self.expected_overtime_damage / 10.,
             self.frost_bolt / 10., self.frost_bolt_cooldown / 10.,
             self.fireball / 10., self.fireball_cooldown / 10.,
             self.missile / 10., self.missile_cooldown / 10.,
-            self.staff, self.hp_regen, self.forward_speed, self.strafe_speed,
+            self.staff, self.hp_regen, self.forward_speed, self.strafse_speed,
             self.aggro / 10., self.current_lane, self.max_fireball_damage
-        ])
+        ])  # Size is 32
 
 MAX_ENEMIES = 10
 MAX_FRIENDS = 10
