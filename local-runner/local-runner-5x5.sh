@@ -1,0 +1,1 @@
+java -Xms512m -Xmx1G -server -jar "local-runner.jar" local-runner-5x5.properties local-runner-sync.default.properties 
