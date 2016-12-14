@@ -391,28 +391,27 @@ def NeutralMinionInactive(m):
     return ((abs(m.speed_x) + abs(m.speed_y) < EPSILON) and
             m.life == m.max_life)
 
-def RealFleeDistance(me, enemy, t, d, state):
-    path = Cache.GetInstance().GetPathToTarget(me, t, state)
+def RealFleeDistance(me, enemy, waypoint, dist, state):
+    path = Cache.GetInstance().GetPathToTarget(me, waypoint, state)
     if path is None:
         return INFINITY
     real_d = 0
-    if me.get_distance_to_unit(enemy) > d - EPSILON:
+    if me.get_distance_to_unit(enemy) > dist - EPSILON:
         return 0
     st = path.GetCurrentTransitionId(me)
     if st is None:
         return INFINITY
     cp = Point.FromUnit(me)
-    for i in range(st, len(path.transitions)):
-        t = path.transitions[i]
-        end_to_enemy = t.end.GetDistanceTo(enemy)
+    for target in path.transitions[st:]:
+        end_to_enemy = target.end.GetDistanceTo(enemy)
         beg_to_enemy = cp.GetDistanceTo(enemy)
-        remaining_d = max(1, d - beg_to_enemy)
+        remaining_d = max(1, dist - beg_to_enemy)
         transition_increase = max(remaining_d, end_to_enemy - beg_to_enemy)
-        if end_to_enemy > d:
-            return real_d + cp.GetDistanceTo(t.end) * (remaining_d / transition_increase)
-        real_d += cp.GetDistanceTo(t.end)
-        cp = t.end
-    return real_d / cp.GetDistanceTo(enemy) * d
+        if end_to_enemy > dist:
+            return real_d + cp.GetDistanceTo(target.end) * (remaining_d / transition_increase)
+        real_d += cp.GetDistanceTo(target.end)
+        cp = target.end
+    return real_d / cp.GetDistanceTo(enemy) * dist
 
 def GetAggro(me, safe_distance, state):
     if state.last_flee_target is None:
@@ -426,19 +425,16 @@ def GetAggro(me, safe_distance, state):
     #TODO(vyakunin): add aggro from respawn
     for e in state.world.wizards + state.world.minions + state.world.buildings:
         if (e.faction != me.faction):
-            # if not (e.id in state.index):
-            #     import pdb; pdb.set_trace()
             es = state.index[e.id]
             deepness = RealFleeDistance(
-                me, e,
-                state.last_flee_target,
+                me, e, state.last_flee_target,
                 es.aggro_range + safe_distance + es.max_speed,
                 state)
             if deepness > 0:
                 aggro += GetUnitAggro(mes, es, deepness, state)
     aggro = mes.get_effective_damage_to_me(aggro) 
     return aggro
-    
+
 def HaveEnoughTimeToTurn(w, angle, target, state, action=ActionType.MAGIC_MISSILE):
     ws = state.index[w.id]
     speed = ws.max_rotation_speed

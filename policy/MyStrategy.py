@@ -200,10 +200,10 @@ class DefaultPolicy(object):
         #     < mes.max_hp * 0.30):
         #     return 0 # FLEE_IN_TERROR
         if mes.fireball_projected_damage > 0 and (
-            (mes.mana > 0.9 * mes.max_mana) or (
-             mes.fireball_projected_damage >= mes.fireball * 2)):
+                (mes.mana > 0.9 * mes.max_mana) or (
+                    mes.fireball_projected_damage >= mes.fireball * 2)):
              return 2 # FIREBALL
-        if (mes.hp - mes.aggro - mes.expected_overtime_damage < mes.max_hp * 0.5):
+        if mes.hp - mes.aggro - mes.expected_overtime_damage < mes.max_hp * 0.5:
             return 1 # FLEE
         if mes.lane not in GetLanes(me):
             return 3 # ADVANCE
