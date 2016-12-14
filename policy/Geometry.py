@@ -18,6 +18,8 @@ from model.LaneType import LaneType
 from model.Tree import Tree
 from Colors import RED
 from Colors import GREEN
+from Colors import BLUE
+from Colors import BLACK
 
 EPSILON = 1E-4
 MACRO_EPSILON = 2
@@ -144,6 +146,16 @@ class Path(object):
                 current = t
         return current
     
+    def GetCurrentTransitionId(self, u):
+        current = None
+        closest = INFINITY
+        for id, t in reversed(list(enumerate(self.transitions))):
+            d = t.GetDistanceTo(u)
+            if d < closest - MACRO_EPSILON:
+                closest = d
+                current = id
+        return current
+    
     def GetNextAngleDistanceAndTargets(self, u):
         current = self.GetCurrentTransition(u)
         if current is None:
@@ -200,7 +212,9 @@ class Point(object):
         #     y = y0 + bt
         #     ax0 + aat + by0 + bbt + c = 0
         #     t = (-ax0 - by0 - c) / (aa + bb)
-        t = (-l.a * self.x - l.b + self.y - l.c) / l.sq_norm
+        if abs(l.sq_norm) < EPSILON:
+            return self
+        t = (-l.a * self.x - l.b * self.y - l.c) / l.sq_norm
         if t < 0:
             t -= additional_shift / l.sq_norm
         else:
@@ -434,7 +448,7 @@ def GetDamagePerTicks(damage, remaining_cooldown, cooldown, ticks):
 def GetTreeCost(start, ids, state):
     if not ids:
         return 0.0
-    ms = state.my_state
+    ms = state.GetMyState()
     cd = 0
     scd = 0
     speed = ms.max_speed
@@ -746,8 +760,10 @@ def PickDodgeDirectionAndTime(me, ps, state, extra_space_required=MACRO_EPSILON)
     if d < EPSILON:
         v = psp - ps.start
     candidates.append(mep + v * ((ps.max_radius + me.radius - d + extra_space_required) / v.Norm()))
-    candidates.append(mep.ProjectToLine(ps.border1.l, extra_space_required))
+    candidates.append(mep.ProjectToLine(ps.border1.l, extra_space_required)) #
     candidates.append(mep.ProjectToLine(ps.border2.l, extra_space_required))
+    p_end_circle = PlainCircle(psp, ps.max_radius + me.radius + extra_space_required)
+    candidates.extend(Line(mep, mep + Point(1, 0).Rotate(me.angle)).IntersectWithCircle(p_end_circle))
     obstacles = []
     for u in state.world.trees + state.world.wizards + state.world.buildings + state.world.minions:
         if psp.GetSqDistanceTo(u) < ps.max_radius + u.radius + me.radius + extra_space_required:
@@ -756,7 +772,7 @@ def PickDodgeDirectionAndTime(me, ps, state, extra_space_required=MACRO_EPSILON)
             # angles on c1, bX - corresponding angles on c2 intersection goes from a1 to a2 in positive
             # direction on c1 and in negative on c2.
             intersections = IntersectCircles(
-                PlainCircle(psp, ps.max_radius + me.radius + extra_space_required),
+                p_end_circle,
                 PlainCircle(u, u.radius + me.radius))
             if intersections:
                 candidates.extend(intersections[0])
@@ -765,8 +781,9 @@ def PickDodgeDirectionAndTime(me, ps, state, extra_space_required=MACRO_EPSILON)
     best = None
     for c in candidates:
         if (c.GetDistanceToSegment(ps.center_line) <
-            ps.max_radius + me.radius + extra_space_required):
+            ps.max_radius + me.radius + extra_space_required - EPSILON):
             continue
+        state.dbg_circle(PlainCircle(c, 2), BLUE)
         good = True
         for o in obstacles:
             if SegmentCrossesCircle(Segment(mep, c), o):
@@ -782,6 +799,9 @@ def PickDodgeDirectionAndTime(me, ps, state, extra_space_required=MACRO_EPSILON)
                                       ps.start))
         if best.time > projectile_distance / ps.speed:
             return None
+        state.dbg_circle(PlainCircle(best.direction, 3), GREEN)
+        state.dbg_text(best.direction, 'TTL = %.2f\nproj_time = %.2f' % 
+            (best.time, projectile_distance / ps.speed), BLACK)
     return best
             
             

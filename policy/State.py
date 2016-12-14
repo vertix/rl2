@@ -15,6 +15,7 @@ from model.World import World
 from model.SkillType import SkillType
 from model.StatusType import StatusType
 from model.ProjectileType import ProjectileType
+from model.Projectile import Projectile
 
 from Analysis import GetAggro
 from Analysis import IsEnemy
@@ -22,6 +23,7 @@ from Analysis import BuildMinionTargets
 from Analysis import Closest
 from Analysis import NeutralMinionInactive
 from Analysis import PickBestFireballTarget
+from Analysis import ActionToProjectileTypeAndRadius
 
 from Geometry import GetLanes
 from Geometry import Point
@@ -97,8 +99,9 @@ class TreeState(State):
 
 
 class ProjectileState(State):
-    def __init__(self, p, me, game, world, last_state, dbg):
+    def __init__(self, p, me, game, world, state, dbg):
         super(ProjectileState, self).__init__(p, me, dbg)
+        last_state = state.last_state
         self.p = self.unit = p
         self.dots = 0.0
         self.game = game
@@ -112,14 +115,21 @@ class ProjectileState(State):
             self.border2 = old_p.border2
             self.center_line = old_p.center_line
             return
+        need_to_subtract = False
         if p.owner_unit_id in last_state.index:
             owner = last_state.index[p.owner_unit_id]
+            need_to_subtract = True
+        elif p.owner_unit_id in state.last_seen:
+            owner = state.last_seen[p.owner_unit_id]
+            need_to_subtract = True
         else:
             self.expected_end = Point.FromUnit(self.unit)
             self.min_damage = self.max_damage = 0.0
             self.expected_speed = math.hypot(p.speed_x, p.speed_y)
             self.border1 = self.border2 = self.center_line = Segment(self.start, self.end)
             return
+        if p.id < 0:
+            need_to_subtract = False
             
         if self.p.type == ProjectileType.FIREBALL:
             self.expected_speed = self.game.fireball_speed
@@ -141,7 +151,9 @@ class ProjectileState(State):
         cast_range = game.fetish_blowdart_attack_range
         if self.p.type != ProjectileType.DART:
             cast_range = owner.unit.cast_range
-        start_point = Point.FromUnit(owner.unit)
+        start_point = Point.FromUnit(p)
+        if need_to_subtract:
+            start_point -= (speed * self.expected_speed)
         self.expected_end = start_point + speed * cast_range
         for t in world.trees:
             tp = Point.FromUnit(t)
@@ -422,6 +434,27 @@ class WizardState(LivingUnitState):
         self.cached_missile_total_cooldown = game.magic_missile_cooldown_ticks
         if SkillType.ADVANCED_MAGIC_MISSILE in self.unit.skills:
             self.cached_missile_total_cooldown = game.wizard_action_cooldown_ticks
+        if w.faction != me.faction and self.fireball and self.fireball_cooldown == 0:
+            self.add_fake_projectile(ActionType.FIREBALL, me, world, game)
+        if w.faction != me.faction and self.frost_bolt and self.frost_bolt_cooldown == 0:
+            self.add_fake_projectile(ActionType.FROST_BOLT, me, world, game)
+        if w.faction != me.faction and self.missile_cooldown == 0:
+            self.add_fake_projectile(ActionType.MAGIC_MISSILE, me, world, game)
+            
+    def add_fake_projectile(self, action, me, world, game):
+        da = self.unit.get_angle_to_unit(me)
+        speed = Point.FromUnit(self.unit) - Point.FromUnit(me)
+        if abs(da) > self.max_rotation_speed:
+            da = da / abs(da) * self.max_rotation_speed
+            speed = Point(1.0, 0.0).Rotate(self.unit.angle + da)
+        t, r = ActionToProjectileTypeAndRadius(action, game)
+        fake_p = Projectile(id=(self.unit.id + 1000) * (-5) - action,
+            x=self.unit.x, y=self.unit.y,
+            speed_x=speed.x, speed_y=speed.y,
+            angle=speed.GetAngle(), faction=self.unit.faction,
+            radius=r, type=t, owner_unit_id=self.unit.id,
+            owner_player_id=self.unit.owner_player_id)
+        self.world.projectiles.append(fake_p)
 
     def handle_improvements(self, w, game, world):
         haste_aura1 = False
@@ -781,12 +814,20 @@ def clean_world(me, world):
 class WorldState(State):
     def __init__(self, me, world, game, lane, last_state, dbg):
         super(WorldState, self).__init__(None, me, dbg)
+        self.my_state = None
         if last_state is not None:
             last_state.last_state = None
             self.last_state = last_state
             self.enemy_base_hp = self.last_state.enemy_base_hp
+            self.last_seen = last_state.last_seen
+            last_state.last_seen = None
+            self.last_flee_target = last_state.last_flee_target
+            self.cached_my_state = last_state.my_state
         else:
             self.enemy_base_hp = 1000
+            self.last_seen = {}
+            self.last_flee_target = None
+            self.cached_my_state = None
 
         self.world = world
         clean_world(me, world)
@@ -795,32 +836,46 @@ class WorldState(State):
         for f in [Faction.ACADEMY, Faction.RENEGADES, Faction.NEUTRAL]:
             self.minion_targets[f] = BuildMinionTargets(f, world)
 
+        self.index = {}
         self.tree_states = [TreeState(t, me, dbg) for t in world.trees]
-        self.projectile_states = [ProjectileState(p, me, game, world, last_state, dbg) for p in world.projectiles]
+        states = []
+        for w in world.wizards:
+            if w != me:
+                ws = WizardState(w, me, game, world, dbg)
+                states.append(ws)
+                self.index[w.id] = ws
+        self.projectile_states = [ProjectileState(p, me, game, world, self, dbg) for p in world.projectiles]
 
-        states = [WizardState(w, me, game, world, dbg) for w in world.wizards if w != me]
-        states += [MinionState(m, me, game, world, self) for m in world.minions]
-        states += [BuildingState(b, me, game, world, dbg) for b in world.buildings]
-
+        for s in ([MinionState(m, me, game, world, self) for m in world.minions] +
+                  [BuildingState(b, me, game, world, dbg) for b in world.buildings]):
+            states.append(s)
+            self.index[s.unit.id] = s
+        # TODO(vertix): Add to state
         for b in world.buildings:
             if b.type == BuildingType.FACTION_BASE and b.faction != me.faction:
                 self.enemy_base_hp = b.life
 
         states = sorted(states, key=lambda x: x.dist)
-        self.index = {}
-        for s in itertools.chain(states, self.tree_states, self.projectile_states):
+        for s in itertools.chain(self.tree_states, self.projectile_states):
             self.index[s.unit.id] = s
+        for w in world.wizards:
+            if w != me:
+                self.last_seen[w.id] = self.index[w.id]
 
         self.my_state = MyState(me, game, world, lane, self)
 
         self.enemy_states = [s for s in states if s.enemy][:MAX_ENEMIES]
-        for s in self.enemy_states:
-            assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
+        # for s in self.enemy_states:
+        #     assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
         self.friend_states = [s for s in states if not s.enemy][:MAX_FRIENDS]
-        for s in self.friend_states:
-            assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
+        # for s in self.friend_states:
+        #     assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
 
-
+    def GetMyState(self):
+        if self.my_state is not None:
+            return self.my_state
+        return self.cached_my_state
+    
     @property
     def ticks_until_end(self):
         return (self.world.tick_count - self.world.tick_index)

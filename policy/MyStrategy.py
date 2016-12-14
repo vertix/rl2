@@ -203,7 +203,7 @@ class DefaultPolicy(object):
             (mes.mana > 0.9 * mes.max_mana) or (
              mes.fireball_projected_damage >= mes.fireball * 2)):
              return 2 # FIREBALL
-        if (mes.hp - mes.aggro - mes.expected_overtime_damage < mes.max_hp * 0.63):
+        if (mes.hp - mes.aggro - mes.expected_overtime_damage < mes.max_hp * 0.5):
             return 1 # FLEE
         if mes.lane not in GetLanes(me):
             return 3 # ADVANCE
@@ -374,6 +374,7 @@ class MyStrategy:
 
         state = None
         state = State.WorldState(me, world, game, self.lane, self.last_state, self.debug)
+        state.last_flee_target = self.flee_action.GetFleeTarget(me)
         noop = Actions.NoOpAction()
 
         targets = [enemy.unit for enemy in state.enemy_states
@@ -385,6 +386,7 @@ class MyStrategy:
                    [noop] * (MAX_TARGETS_NUM - len(targets)))
 
         a = self.policy.Act(state)
+        
         if self.args and self.args.verbose and a != self.last_action:
             print actions[a].name
 

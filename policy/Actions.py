@@ -252,12 +252,14 @@ class MoveAction(object):
         return None
 
     def MakeFleeMove(self, me, move, state):
-        waypoints = self.waypoints_by_lane[self.lane]
-        i = GetPrevWaypoint(waypoints, me)
-        target = waypoints[i]
+        state.last_flee_target = target = self.GetFleeTarget(me)
         # print Point.FromUnit(me), target
         self.RushToTarget(me, target, move, state)
-            
+    
+    def GetFleeTarget(self, me):
+        waypoints = self.waypoints_by_lane[self.lane]
+        i = GetPrevWaypoint(waypoints, me)
+        return waypoints[i]
 
     def MakeAdvanceMove(self, me, move, state):
         waypoints = self.waypoints_by_lane[self.lane]
@@ -311,9 +313,7 @@ class MoveAction(object):
             if n_t is not None:
                 t = n_t
                 distance = me.get_distance_to_unit(t)
-                if (not TargetInRangeWithAllowance(me, t, -radius, state) or
-                    (isinstance(t, Wizard) and 
-                     not CanHitWizard(me, t, action, state, True))):
+                if not TargetInRangeWithAllowance(me, t, -radius, state):
                     move.action = ActionType.NONE
             else:
                 move.action = ActionType.NONE
@@ -477,7 +477,7 @@ class FireballAction(MoveAction):
         t = state.my_state.fireball_target
         angle = me.get_angle_to_unit(t)
         if not self.dodging:
-            self.RushToTarget(me, t, move, state)
+            self.MakeFleeMove(me, move, state)
         if abs(angle) < state.game.staff_sector / 2:
             move.action = ActionType.FIREBALL
             move.cast_angle = angle
@@ -487,13 +487,13 @@ class FireballAction(MoveAction):
         state.dbg_line(me, t)
         speed = t - me
         if move.action == ActionType.FIREBALL:
-            fake_p = Projectile(id=-me.id, x=me.x, y=me.y, speed_x=speed.x, speed_y=speed.y,
+            fake_p = Projectile(id=-me.id - 1, x=me.x, y=me.y, speed_x=speed.x, speed_y=speed.y,
                 angle=speed.GetAngle(), faction=me.faction, radius=state.game.fireball_radius, 
                 type=ProjectileType.FIREBALL, owner_unit_id=me.id,
                 owner_player_id=me.owner_player_id)
             from State import ProjectileState
             ps = ProjectileState(p=fake_p, me=me, game=state.game,
-                                 world=state.world, last_state=state, dbg=state.dbg)
+                                 world=state.world, state=state, dbg=state.dbg)
             if ps.end.GetSqDistanceTo(me) < t.GetSqDistanceTo(me) - EPSILON:
                 move.action = ActionType.MAGIC_MISSILE
         self.MaybeSetLanes(me, move)      
