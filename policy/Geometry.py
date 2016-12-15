@@ -173,10 +173,10 @@ class Line(object):
         self.b = p2.x - p1.x
         self.c = -self.a * p1.x - self.b * p1.y
         self.sq_norm = self.a * self.a + self.b * self.b
-    
+
     def Normal(self):
         return Point(self.a, self.b) * (1.0 / sqrt(self.sq_norm))
-    
+
     def IntersectWithCircle(self, c):
         # Ax + By + C = 0
         # (x - c.x) ^ 2 + (y - c.y) ^ 2 = c.r ^ 2
@@ -184,10 +184,10 @@ class Line(object):
             return []
         a = acos(c.p.GetDistanceToLine(self) / c.radius)
         return [self.Normal().Rotate(a) * c.radius + c, self.Normal().Rotate(-a) * c.radius + c]
-        
+
     def __str__(self):
         return '(%.6f*x + %.6f*y + %.6f = 0)' % (self.a, self.b, self.c)
-    
+
     def __repr__(self):
         return self.__str__()
 
@@ -223,7 +223,7 @@ class Point(object):
 
     def Rotate(self, a):
         return Point(self.x * cos(a) - self.y * sin(a), self.x * sin(a) + self.y * cos(a))
-        
+
     def GetDistanceTo(self, p):
         return (self - p).Norm()
 
@@ -261,27 +261,27 @@ class Point(object):
         ans = min(self.GetSqDistanceTo(p1), self.GetSqDistanceTo(p2))
         if ((self - p1).ScalarMul(p2 - p1) > 0) and ((self - p2).ScalarMul(p1 - p2) > 0):
             ans = min(ans, self.GetSqDistanceToLine(s.l))
-            
+
         return ans
-    
+
     def GetAngle(self):
         return atan2(self.y, self.x)
-        
+
     def __add__(self, other):
         return Point(self.x + other.x, self.y + other.y)
-    
+
     def __mul__(self, f):
         return Point(self.x * f, self.y * f)
-        
+
     def __sub__(self, other):
         return Point(self.x - other.x, self.y - other.y)
 
     def __str__(self):
         return 'Point(%.3f, %.3f)' % (self.x, self.y)
-    
+
     def __repr__(self):
         return self.__str__()
-    
+
 
 def BuildObstacles(me, state):
    obstacles = [(me.get_distance_to_unit(unit), deepcopy(unit)) for unit in 
