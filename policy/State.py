@@ -30,6 +30,7 @@ from Geometry import Point
 from Geometry import Line
 from Geometry import Segment
 from Geometry import PlainCircle
+from Geometry import BuildPaths
 
 from copy import deepcopy
 
@@ -426,6 +427,7 @@ class WizardState(LivingUnitState):
             missile_radius = max(missile_radius, game.frost_bolt_radius)
         if self.has_fireball:
             missile_radius = max(missile_radius, game.fireball_explosion_min_damage_range)
+        # me.radius is needed to make towers work uniformly
         self.effective_range = w.cast_range + missile_radius + me.radius
         self.hastened = StatusType.HASTENED in [st.type for st in w.statuses]
 
@@ -795,8 +797,8 @@ class MyState(WizardState):
             self.aggro / 10., self.current_lane, self.max_fireball_damage
         ])
 
-MAX_ENEMIES = 10
-MAX_FRIENDS = 10
+MAX_ENEMIES = 20
+MAX_FRIENDS = 20
 MAX_PROJECTILES = 5
 
 def clean_world(me, world):
@@ -870,6 +872,9 @@ class WorldState(State):
         self.friend_states = [s for s in states if not s.enemy][:MAX_FRIENDS]
         # for s in self.friend_states:
         #     assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
+        
+        if world.tick_index % GRAPH_REBUILD_FREQUENCY == 0:
+            BuildPaths(self)
 
     def GetMyState(self):
         if self.my_state is not None:

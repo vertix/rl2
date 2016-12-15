@@ -29,8 +29,9 @@ INFINITY = 1e6
 TICKS_TO_ACCOUNT_FOR = 10
 RADIUS_ALLOWANCE = 2
 HALF_LANE_WIDTH = 500
+LEFT_DIAGONAL = 4
 
-def GetLanes(u):
+def GetLanes(u, half_lane_width=HALF_LANE_WIDTH):
     lanes = []
     if u is None:
         return lanes
@@ -44,16 +45,24 @@ def GetLanes(u):
     top = Line(top_right, top_left)
     bottom = Line(bottom_left, bottom_right)
     diagonal = Line(bottom_left, top_right)
+    left_diagonal = Line(bottom_right, top_left)
 
-    if ((p.GetDistanceToLine(left) < HALF_LANE_WIDTH) or 
-        (p.GetDistanceToLine(top) < HALF_LANE_WIDTH)):
+    if ((p.GetDistanceToLine(left) < half_lane_width) or 
+        (p.GetDistanceToLine(top) < half_lane_width)):
         lanes.append(LaneType.TOP)
-    if ((p.GetDistanceToLine(right) < HALF_LANE_WIDTH) or 
-        (p.GetDistanceToLine(bottom) < HALF_LANE_WIDTH)):
+    if ((p.GetDistanceToLine(right) < half_lane_width) or 
+        (p.GetDistanceToLine(bottom) < half_lane_width)):
         lanes.append(LaneType.BOTTOM)
-    if p.GetDistanceToLine(diagonal) < HALF_LANE_WIDTH: 
+    if p.GetDistanceToLine(diagonal) < half_lane_width: 
         lanes.append(LaneType.MIDDLE)
+    if p.GetDistanceToLine(left_diagonal) < half_lane_width: 
+        lanes.append(LEFT_DIAGONAL)
     return lanes
+
+
+def DeepInForest(p):
+    return not GetLanes(p, 330)
+
 
 class Transition(object):
     def __init__(self, begin, end, edge):
@@ -448,6 +457,8 @@ def GetDamagePerTicks(damage, remaining_cooldown, cooldown, ticks):
 def GetTreeCost(start, ids, state):
     if not ids:
         return 0.0
+    if DeepInForest(start):
+        return 0.0
     ms = state.GetMyState()
     cd = 0
     scd = 0
@@ -527,26 +538,27 @@ class Obstacle(CircularUnit):
                               u.angle, u.faction, u.radius)
         self.is_tree = isinstance(u, Tree)
             
-# target = (x, y)
+# targets = list(Point) places I wannna get to
 # units = list(CircularUnit)
 # TODO(vyakunin): decide on a better interface
 # returns [(point, previous_point_no, shortest_distance)], points_per_unit: list(list(int)))
-def FindOptimalPaths(me, units, state):
+def FindOptimalPaths(me, targets, units, state):
     me_point = Obstacle(me, me)
     me_point.radius = 0
     all_units = deepcopy(units)
-    for o in units:
-        if abs(o.speed_x) + abs(o.speed_y) > EPSILON:
-            new_o = deepcopy(o)
-            new_o.x += o.speed_x * TICKS_TO_ACCOUNT_FOR
-            new_o.y += o.speed_y * TICKS_TO_ACCOUNT_FOR
-            all_units.append(new_o)
+    # for o in units:
+    #     if abs(o.speed_x) + abs(o.speed_y) > EPSILON:
+    #         new_o = deepcopy(o)
+    #         new_o.x += o.speed_x * TICKS_TO_ACCOUNT_FOR
+    #         new_o.y += o.speed_y * TICKS_TO_ACCOUNT_FOR
+    #         all_units.append(new_o)
     for o in all_units:  
-        o.radius = o.radius + me.radius + RADIUS_ALLOWANCE
+        o.radius = o.radius + me.radius + MACRO_EPSILON
         if me.get_distance_to_unit(o) < o.radius + EPSILON:
             o.radius = max(0, me.get_distance_to_unit(o) - EPSILON)
-    all_units = [me_point] + all_units
-    
+    all_units = [Obstacle(me, PlainCircle(t, 0)) for t in targets] + [me_point] + all_units
+    for t in targtes:
+        state.dbg_circle(PlainCircle(t, 2))
     for u in all_units:
         state.dbg_circle(u)
     
@@ -642,6 +654,26 @@ def BuildPath(me, target, state):
     for i, p in enumerate(path[:-1]):
         path[i] = (path[i][0], path[i+1][1])
     return Path(path)
+
+def BuildPaths(state, interesting_points=[]):
+    mes = state.my_state
+    me = mes.unit
+    enemies = state.enemy_states
+    obstacles = BuildObstacles(me, state)
+    aggros = [PlainCircle(e.unit, e.aggro_range + MACRO_EPSILON) for e in enemies]
+    obstacle_circles = [PlainCircle(o, o.radius + me.radius + MACRO_EPSILON) for o in obstacles]
+    targets = [PlainCircle(e.unit, e.radius + me.cast_range - MACRO_EPSILON)
+               for e in enemies]
+    everything = obstacle_circles + aggros + targets
+    for i, c1 in enumerate(everything):
+        for c2 in everything[i + 1:]
+            intersections = IntersectCircles(c1, c2)
+            if interestions is not None:
+                interesting_points.extend(intersections[0])
+    
+    p, prev, d, points_per_unit = FindOptimalPaths(
+        me, intersections, obstacles, state)
+    
     
 def SegmentsIntersect(l1, r1, l2, r2):
     if abs(l1 - l2) + abs(r1 - r2) < EPSILON:
