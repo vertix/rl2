@@ -861,7 +861,7 @@ class AttackGraphNode(object):
         self.my_target = None
 
     def ModelTime(self, time):
-
+        pass
 
     def LivingTime(self, damage_per_tick):
         if damage_per_tick > self.regen:
