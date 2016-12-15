@@ -476,8 +476,6 @@ class HistoricStateTracker(object):
             found = False
             for real_b in world.buildings:
                 if (real_b.faction != me.faction):
-                    # if real_b.type == BuildingType.FACTION_BASE:
-                    #     import pdb; pdb.set_trace()
                     if ((real_b.get_distance_to_unit(fake_b) < 500) and
                         (real_b.type == fake_b.type)):
                             found = True
