@@ -20,6 +20,8 @@ parser.add_argument('--debug', action='store_true')
 parser.add_argument('--n_step', action='store_true')
 parser.add_argument('--dropout', default=1.0, type=float)
 
+parser.add_argument('--smart', action='store_true')
+
 ARGS = parser.parse_args()
 
 

@@ -23,18 +23,21 @@ class MockState(object):
         self.rel_position = pos
         if type == state.LUType.MINION:
             self.hp = 30
+            self.damage = 10
             self.damage_per_tick = 0.5
             self.max_speed = 10.
             self.attack_range = 5.
             self.hp_regen = 0.
         elif type == state.LUType.WIZARD:
             self.hp = 100
+            self.damage = 20
             self.damage_per_tick = 1.
             self.max_speed = 10.
             self.attack_range = 100.
             self.hp_regen = 0.1
         else:
             self.hp = 300
+            self.damage = 20
             self.damage_per_tick = 0.5
             self.max_speed = 0.
             self.attack_range = 150.
@@ -42,6 +45,17 @@ class MockState(object):
 
         self.max_hp = self.hp
 
+
+def LivingTime(preds):
+    left, right = 0, len(preds)
+    while left < right:
+        mid = (left + right) / 2
+        print left, mid, right
+        if preds[mid].hp <= 0:
+            right = mid
+        else:
+            left = mid + 1
+    return preds[left].time
 
 class ModelingUnittest(unittest.TestCase):
     def setUp(self):
@@ -68,6 +82,7 @@ class ModelingUnittest(unittest.TestCase):
         self.assertTrue(hostile_tower in result)
 
         print result[minion]
+        print 'living time %d' % LivingTime(result[minion])
 
         self.assertLessEqual(result[minion][-1].hp, 0)
         self.assertGreater(

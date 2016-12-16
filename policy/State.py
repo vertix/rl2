@@ -1,3 +1,4 @@
+import bisect
 import collections
 import itertools
 import math
@@ -61,7 +62,7 @@ class State(object):
         self.numpy_cache = None
         self.dbg = dbg
         self.dist_cache = unit.get_distance_to_unit(me) if unit is not None else 0.0
-    
+
     @property
     def dist(self):
         return self.dist_cache
@@ -74,7 +75,7 @@ class State(object):
         for l in lines:
             self.dbg.text(pos.x, y, l, color)
             y += 14
-    
+
     def dbg_line(self, p1, p2, color=BLACK):
         if self.dbg is None:
             return
@@ -250,6 +251,7 @@ class LivingUnitState(State):
         self.game = game
         self.world = world
         self.cache_rel_angle = me.get_angle_to_unit(unit) if me is not None else 0.0
+        self.preds = []
         self.dots = 0.0
         if unit is None:
             return
@@ -413,7 +415,29 @@ class LivingUnitState(State):
 
     @property
     def predictions(self):
-        pass
+        return self.preds
+
+    @property
+    def projected_living_time(self):
+        left, right = 0, len(self.preds)
+        while left < right:
+            mid = (left + right) / 2
+            if self.preds[mid].hp <= 0:
+                right = mid
+            else:
+                left = mid + 1
+
+        if left >= len(self.preds):
+            return 20000.
+        return self.preds[left].time
+
+        # for p in self.preds:
+        #     if p.hp == 0:
+        #         return p.time
+        # return 20000.
+
+    def SetPredictions(self, preds):
+        self.preds = preds
 
     def _to_numpy_internal(self):
         return np.array([
@@ -835,8 +859,13 @@ def clean_world(me, world):
     world.projectiles = new_p
 
 
-UnitPrediction = collections.namedtuple(
-    'UnitPrediction', ['time', 'hp', 'pos', 'damage_caused', 'deaths_caused'])
+class UnitPrediction(collections.namedtuple(
+    'UnitPrediction', ['time', 'hp', 'pos', 'damage_caused', 'deaths_caused'])):
+
+    def __str__(self):
+        return '%d -> hp%d %s %s' % (self.time, self.hp, 
+                                     ['%d: %.1f' % i for i in self.damage_caused.items()],
+                                     ['%d: %.1f' % i for i in self.deaths_caused.items()])
 
 
 class UnitModel(object):
@@ -895,14 +924,24 @@ class UnitModel(object):
             self.target = None
             return
 
-        new_target = min(self.enemies, key=lambda u: self.Distance(u))
-        if new_target != self.target and self.target:
+        if self.unit_state.type == LUType.MINION:
+            new_target = min(self.enemies, key=lambda u: self.Distance(u))
+        else:
+            def SmartDamageKey(target):
+                if self.Distance(target) > self.unit_state.attack_range:
+                    return 100500. + self.Distance(target)
+                if target.hp > self.unit_state.damage:
+                    return target.hp
+                return -target.hp
+            new_target = min(self.enemies, key=SmartDamageKey)
+
+        if new_target != self.target and self.target and self in self.target.current_attackers:
             self.target.current_attackers.remove(self)
 
         self.target = new_target
 
         if self.Distance(self.target) <= self.unit_state.attack_range:
-            print '  %s attacks %s' % (self, self.target)
+            # print '  %s attacks %s' % (self, self.target)
             self.target.current_attackers.add(self)
             # self.target.next_attackers.add(self)
 
@@ -913,11 +952,10 @@ class UnitModel(object):
             self.position += vec * (time * self.speed / vec.Norm())
             if self.distance_to_target < self.unit_state.attack_range:
                 self.target.next_attackers.add(self)   # Now we are ready to attack.
-                # self.target.next_attackers[self] = 0.   # Now we are ready to attack.
 
         # Now we model attack on this unit.
         for a in self.current_attackers:
-            print "# %s damages %s for %d" % (a, self, time)
+            # print "# %s damages %s for %d" % (a, self, time)
 
             dmg = time * a.dpt
             # print '-- Inferred damage %.1f' % dmg
@@ -933,7 +971,7 @@ class UnitModel(object):
                 a.deaths_caused[self.unit_state.type] += dmg / tot_dmg
 
     def UpdateAttackers(self):
-        if self.hp <= 0:
+        if self.hp <= 0 and self in self.target.current_attackers:
             # Stop attacking
             self.target.current_attackers.remove(self)
         return
@@ -944,10 +982,10 @@ class UnitModel(object):
         if dist_to_attack > 0 and self.speed > 0:
             move_time = int(math.ceil(dist_to_attack / self.speed))
             if move_time < self.living_time:
-                print '  %s comes to %s in %d' % (self, self.target, move_time)
+                # print '  %s comes to %s in %d' % (self, self.target, move_time)
                 return move_time
             elif self.living_time < 20000:
-                print '  %s dies in %d' % (self, self.living_time)
+                # print '  %s dies in %d' % (self, self.living_time)
         return self.living_time
 
     @property
@@ -988,7 +1026,7 @@ def ModelEngagement(friends, enemies):
         if dt > 15000:  # Too long
             break
 
-        print '->%s : %d' % (u, dt)
+        # print '->%s : %d' % (u, dt)
 
         for u in itertools.chain(friends, enemies):
             u.ModelTimePeriod(dt)
@@ -1020,24 +1058,10 @@ def ModelEngagement(friends, enemies):
                                c.damage_caused.copy(),
                                c.deaths_caused.copy()))
 
-    print 'Finally:'
-    for f in friends:
-        print f
-    for e in enemies:
-        print e
-
     return events
 
 
 class WorldState(State):
-    def ModelEngagement(self):
-        print ModelEngagement(
-            [f for f in self.friend_states
-             if f.get_distance_to_unit(f.me) < 1000.],
-            [e for e in self.enemy_states
-             if e.get_distance_to_unit(e.me) < 1000.])
-
-
     def __init__(self, me, world, game, lane, last_state, dbg):
         super(WorldState, self).__init__(None, me, dbg)
         self.my_state = None
@@ -1067,7 +1091,7 @@ class WorldState(State):
         self.tree_states = [TreeState(t, me, dbg) for t in world.trees]
         states = []
         for w in world.wizards:
-            if w != me:
+            if w.id != me.id:
                 ws = WizardState(w, me, game, world, dbg)
                 states.append(ws)
                 self.index[w.id] = ws
@@ -1087,7 +1111,7 @@ class WorldState(State):
         for s in itertools.chain(self.tree_states, self.projectile_states):
             self.index[s.unit.id] = s
         for w in world.wizards:
-            if w != me:
+            if w.id != me.id:
                 self.last_seen[w.id] = self.index[w.id]
 
         self.my_state = MyState(me, game, world, lane, self)
@@ -1095,8 +1119,29 @@ class WorldState(State):
         self.enemy_states = [s for s in states if s.enemy][:MAX_ENEMIES]
         self.friend_states = [s for s in states if not s.enemy][:MAX_FRIENDS]
 
-        # if len(self.enemy_states) > 1:
-        #     self.ModelEngagement()
+        if len(self.enemy_states) > 1:
+            eng = self.ModelEngagement()
+            if eng:
+                # Rewrite to bin search
+                for k, v in eng.iteritems():
+                    k.SetPredictions(v)
+                    k.dbg_text(Point.FromUnit(k.unit) - Point(50, -50),
+                               'TTL:%d' % k.projected_living_time)
+
+    def ModelEngagement(self):
+        res = ModelEngagement(
+            [f for f in self.friend_states + [self.my_state]
+             if f.unit.get_distance_to_unit(f.me) < 1500.],
+            [e for e in self.enemy_states
+             if e.unit.get_distance_to_unit(e.me) < 1500.])
+        # if res:
+        #     for k, v in res.iteritems():
+        #         print '<<<<<<<<<   %s   >>>>>>>>>' % (UnitModel(k))
+        #         for item in v:
+        #             print '  ' + str(item)
+        #         print ""
+        #     print '---------------------------'
+        return res
 
     def GetMyState(self):
         if self.my_state is not None:
