@@ -232,7 +232,8 @@ class MoveAction(object):
         t_ids = []
         if not self.dodging:
             path = Cache.GetInstance().GetPathToTarget(me, target, state)
-            path.Show(state)
+            if path is not None:
+                path.Show(state)
         if path is None:
             angle = me.get_angle_to_unit(target)
         else:
@@ -260,11 +261,14 @@ class MoveAction(object):
         waypoints = self.waypoints_by_lane[self.lane]
         i = GetPrevWaypoint(waypoints, me)
         return waypoints[i]
-
-    def MakeAdvanceMove(self, me, move, state):
+        
+    def GetAdvanceTarget(self, me):
         waypoints = self.waypoints_by_lane[self.lane]
         i = GetNextWaypoint(waypoints, me)
-        target = waypoints[i]
+        return waypoints[i]
+
+    def MakeAdvanceMove(self, me, move, state):
+        state.last_advance_target = target = self.GetAdvanceTarget(me)
         self.RushToTarget(me, target, move, state)
     
     def PickActionAndCooldown(self, me, target, state):

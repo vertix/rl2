@@ -30,6 +30,8 @@ TICKS_TO_ACCOUNT_FOR = 10
 RADIUS_ALLOWANCE = 2
 HALF_LANE_WIDTH = 500
 LEFT_DIAGONAL = 4
+DISTANCE_VS_DAMAGE_FACTOR = 0.1
+MAX_ENEMIES = 3
 
 def GetLanes(u, half_lane_width=HALF_LANE_WIDTH):
     lanes = []
@@ -273,6 +275,14 @@ class Point(object):
             
         return ans
     
+    def ProjectToCircle(self, c):
+        c_to_me = self - c
+        norm = c_to_me.Norm()
+        if abs(norm) < EPSILON:
+            c_to_me = Point(1.0, 0)
+            norm = 1.0
+        return Point.FromUnit(c) + (c_to_me * (c.radius / norm))
+    
     def GetAngle(self):
         return atan2(self.y, self.x)
         
@@ -297,7 +307,7 @@ def BuildObstacles(me, state):
        state.world.wizards + state.world.minions + state.world.trees + state.world.buildings 
        if me.get_distance_to_unit(unit) < me.vision_range and me.id != unit.id]
    obstacles.sort()
-   obstacles = [Obstacle(me, o) for _, o in obstacles]
+   obstacles = [Obstacle(o) for _, o in obstacles]
    new_obstacles = []
    total = 0
    trees = 0
@@ -370,8 +380,9 @@ def SegmentClearFromHardObstacles(s, obstacles, soft_obstacles, state):
     obs = []
     for i, o in enumerate(obstacles):
         if SegmentCrossesCircle(s, o):
-            if o.is_tree:
-                obs.append((o.id, o))
+            if o.soft:
+                if o.is_tree:
+                    obs.append((o.id, o))
             else:
                 return False
     obs.sort(key=lambda x: s.p1.GetSqDistanceTo(x[1]))
@@ -505,10 +516,20 @@ def GetTreeCost(start, ids, state):
 def AddEdge(points, i1, i2, d, g, state, type=Edge.SEGMENT, circle=None, target_ids=[]):
     if Invalid(points[i1], state) or Invalid(points[i2], state):
         return
-    g[i1].append(Edge(i2, d + GetTreeCost(points[i1], target_ids, state),
+    mid = (points[i1] + points[i2]) * 0.5
+    if type == Edge.ARC:
+        mid = points[i1]
+    dpt = 0
+    for es in state.enemy_states:
+        if mid.GetSqDistanceTo(es.unit) < es.aggro_range * es.aggro_range:
+            dpt += es.damage_per_tick
+    dpd = DISTANCE_VS_DAMAGE_FACTOR + dpt / state.my_state.strafe_speed
+    state.dbg_text(mid, 'dpd:%.3f' % (dpd*1000))
+    g[i1].append(Edge(i2, (d + GetTreeCost(points[i1], target_ids, state)) * dpd,
                  type, circle, target_ids))
-    g[i2].append(Edge(i1, d + GetTreeCost(points[i2], list(reversed(target_ids)), state),
-                 type, circle, list(reversed(target_ids))))
+    g[i2].append(Edge(
+        i1, (d + GetTreeCost(points[i2], list(reversed(target_ids)), state)) * dpd,
+        type, circle, list(reversed(target_ids))))
 
 def GetAngleDiff(a1, a2):
     alpha = abs(a1 - a2)
@@ -533,17 +554,30 @@ def Downcast(ancestor, descendent):
     return descendent
     
 class Obstacle(CircularUnit):
-    def __init__(self, me, u):
-        CircularUnit.__init__(self, u.id, u.x, u.y, u.speed_x, u.speed_y,
-                              u.angle, u.faction, u.radius)
+    def __init__(self, u, soft=False):
+        CircularUnit.__init__(self, u.id if hasattr(u, 'id') else None,
+                              u.x, u.y, 
+                              u.speed_x if hasattr(u, 'speed_x') else None,
+                              u.speed_y if hasattr(u, 'speed_y') else None,
+                              u.angle if hasattr(u, 'angle') else None,
+                              u.faction if hasattr(u, 'faction') else None,
+                              u.radius)
         self.is_tree = isinstance(u, Tree)
+        self.soft = self.is_tree or soft
+            
+class CalculatedGraph(object):
+    def __init__(self, points, prev, optimal_distances, points_per_unit):
+        self.points = points
+        self.prev = prev
+        self.optimal_distances = optimal_distances
+        self.points_per_unit = points_per_unit         
             
 # targets = list(Point) places I wannna get to
 # units = list(CircularUnit)
 # TODO(vyakunin): decide on a better interface
 # returns [(point, previous_point_no, shortest_distance)], points_per_unit: list(list(int)))
 def FindOptimalPaths(me, targets, units, state):
-    me_point = Obstacle(me, me)
+    me_point = Obstacle(me)
     me_point.radius = 0
     all_units = deepcopy(units)
     # for o in units:
@@ -552,12 +586,12 @@ def FindOptimalPaths(me, targets, units, state):
     #         new_o.x += o.speed_x * TICKS_TO_ACCOUNT_FOR
     #         new_o.y += o.speed_y * TICKS_TO_ACCOUNT_FOR
     #         all_units.append(new_o)
-    for o in all_units:  
-        o.radius = o.radius + me.radius + MACRO_EPSILON
-        if me.get_distance_to_unit(o) < o.radius + EPSILON:
-            o.radius = max(0, me.get_distance_to_unit(o) - EPSILON)
-    all_units = [Obstacle(me, PlainCircle(t, 0)) for t in targets] + [me_point] + all_units
-    for t in targtes:
+    # for o in all_units:
+    #     o.radius = o.radius + MACRO_EPSILON
+        # if me.get_distance_to_unit(o) < o.radius + EPSILON:
+        #     o.radius = max(0, me.get_distance_to_unit(o) - EPSILON)
+    all_units = [me_point] + [Obstacle(PlainCircle(t, 0)) for t in targets] + all_units
+    for t in targets:
         state.dbg_circle(PlainCircle(t, 2))
     for u in all_units:
         state.dbg_circle(u)
@@ -575,6 +609,8 @@ def FindOptimalPaths(me, targets, units, state):
         points_per_unit.append([])
     for i, u1 in enumerate(all_units):
         for j, u2 in enumerate(all_units[i+1:]):
+            if (u1.is_tree and DeepInForest(u1)) or (u2.is_tree and DeepInForest(u2)):
+                continue
             j += i + 1
             tangents = BuildTangents(u1, u2)
             for p1, a1, p2, a2 in tangents:
@@ -617,39 +653,50 @@ def FindOptimalPaths(me, targets, units, state):
                         graph, state, type=Edge.ARC, circle=u)
         # leave just list of point numbers
         points_per_unit[unit_index] = [k for _, __, k in p if k != -1]
-    
+    for i, u in enumerate(all_units):
+        state.dbg_circle(u, BLUE)
+    for i, p in enumerate(points):
+        for e in graph[i]:
+            color = GREEN
+            if e.target_ids or e.type == Edge.ARC:
+                color = RED
+            state.dbg_line(points[i], points[e.v], color)
+            
     optimal_distances, prev = Dijkstra(graph)
-    return (points, prev, optimal_distances, points_per_unit)
+    return CalculatedGraph(points, prev, optimal_distances, points_per_unit)
     
 
 # returns [[point, is_arc, circle]]
 def BuildPath(me, target, state):
-    obstacles = BuildObstacles(me, state)
-    if isinstance(target, LivingUnit):
-        t = deepcopy(target)
-    else:
-        t = LivingUnit(0, target.x, target.y, 0, 0, 0, 0, 0, 0, 0, [])
-    obstacles = [o for o in obstacles if o.get_distance_to_unit(target) > 
-                                         o.radius - t.radius]
-    p, prev, d, points_per_unit = FindOptimalPaths(
-        me, [Obstacle(me, t)] + obstacles, state)
+    if state.graph is None:
+        return None
     t_id = -1
     min_d = INFINITY
-    for ps in points_per_unit[1]:
-        if t_id == -1 or d[ps] < min_d:
-            min_d = d[ps]
-            t_id = ps
+    opt_d = INFINITY
+    for i, point in enumerate(state.graph.points):
+        if state.graph.optimal_distances[i] > INFINITY / 2:
+            continue
+        new_d = point.GetSqDistanceTo(target)
+        if t_id == -1 or (new_d < min_d - EPSILON or (abs(new_d - min_d) < EPSILON and
+                          state.graph.optimal_distances[i] < opt_d - EPSILON)):
+            min_d = new_d
+            opt_d = state.graph.optimal_distances[i]
+            t_id = i
     if t_id == -1:
         # import pdb; pdb.set_trace()
         # print 'no way to ' + str(target)
         return None
     # import pdb; pdb.set_trace()
-    path = [(p[t_id], prev[t_id][1])]
+    path = [(state.graph.points[t_id], state.graph.prev[t_id][1])]
     
-    while prev[t_id][0] != -1:
-        t_id = prev[t_id][0]
-        path.append((p[t_id], prev[t_id][1]))
+    while state.graph.prev[t_id][0] != -1:
+        t_id = state.graph.prev[t_id][0]
+        path.append((state.graph.points[t_id], state.graph.prev[t_id][1]))
     path.reverse()
+    
+    if len(path) == 1:
+        # import pdb; pdb.set_trace()
+        return None
     
     for i, p in enumerate(path[:-1]):
         path[i] = (path[i][0], path[i+1][1])
@@ -658,21 +705,24 @@ def BuildPath(me, target, state):
 def BuildPaths(state, interesting_points=[]):
     mes = state.my_state
     me = mes.unit
+    mep = Point.FromUnit(me)
     enemies = state.enemy_states
     obstacles = BuildObstacles(me, state)
-    aggros = [PlainCircle(e.unit, e.aggro_range + MACRO_EPSILON) for e in enemies]
-    obstacle_circles = [PlainCircle(o, o.radius + me.radius + MACRO_EPSILON) for o in obstacles]
+    for o in obstacles:
+        o.radius += me.radius + MACRO_EPSILON
+    aggros = [PlainCircle(e.unit, e.aggro_range + MACRO_EPSILON) for e in
+              sorted(enemies, key=lambda x: -x.damage)][:MAX_ENEMIES]
     targets = [PlainCircle(e.unit, e.radius + me.cast_range - MACRO_EPSILON)
-               for e in enemies]
-    everything = obstacle_circles + aggros + targets
+               for e in sorted(enemies, key=lambda x: mep.GetSqDistanceTo(x.unit))][:MAX_ENEMIES]
+    everything = aggros + targets
+    additional_obstacles = [Obstacle(a, True) for a in everything]
     for i, c1 in enumerate(everything):
-        for c2 in everything[i + 1:]
-            intersections = IntersectCircles(c1, c2)
-            if interestions is not None:
-                interesting_points.extend(intersections[0])
-    
-    p, prev, d, points_per_unit = FindOptimalPaths(
-        me, intersections, obstacles, state)
+        if me.get_distance_to_unit(c1) > 1000:
+            continue
+        interesting_points.append(mep.ProjectToCircle(c1))
+    for p in interesting_points:
+        state.dbg_circle(PlainCircle(p, 3), BLUE)
+    return FindOptimalPaths(me, interesting_points, obstacles + additional_obstacles, state)
     
     
 def SegmentsIntersect(l1, r1, l2, r2):

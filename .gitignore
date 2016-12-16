@@ -1,5 +1,7 @@
 **/*.pyc
 local-runner/game.log
-policy/*0000
-policy/*0000.meta
+**/*000
+**/*000.meta
+**/*000.index
+**/*000.data-00000-of-00001
 policy/*-checkpoint.ipynb

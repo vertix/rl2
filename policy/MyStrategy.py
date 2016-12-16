@@ -68,36 +68,28 @@ class QFunction(object):
         self.keep_prob = keep_prob
 
     def Q(self, state):
-        state = Normalize(state, self.vars['mean:0'], self.vars['std:0'])
-        # state = BatchNorm(state, self.vars, 'model/norm', shift=False)
+        # state = Normalize(state, self.vars['mean:0'], self.vars['std:0'])
+
+        my_state = state[:32 + 10 * 36]
+        friends = state[32 + 10 * 36: 32 + 20 * 36].reshape((10, -1))
+        friends = np.matmul(friends, self.vars['model/friends/Conv/weights:0'][0, 0, :, :])
+        friends += self.vars['model/friends/Conv/biases:0']
+        friends = Elu(friends)
+        friends = friends.max(0)
+        rest_state = state[32 + 20 * 36:]
+        state = np.concatenate((my_state, friends, rest_state))
 
         state = np.matmul(state, self.vars['model/hidden1/weights:0'])
         state += self.vars['model/hidden1/biases:0']
-        # state = BatchNorm(state, self.vars, 'model/hidden1/BatchNorm')
         state = Elu(state)
-
-        if self.keep_prob < 1.:
-            state = Dropout(state, self.keep_prob)
 
         state = np.matmul(state, self.vars['model/hidden2/weights:0'])
         state += self.vars['model/hidden2/biases:0']
-        # state = BatchNorm(state, self.vars, 'model/hidden2/BatchNorm')
         state = Elu(state)
 
-        if self.keep_prob < 1.:
-            state = Dropout(state, self.keep_prob)
-
-        # value = np.matmul(state, self.vars['model/val_hid/weights:0'])
-        # value += self.vars['model/val_hid/biases:0']
-        # value = BatchNorm(value, self.vars, 'model/val_hid/BatchNorm')
-        # value = ReLu(value)
         value = np.matmul(state, self.vars['model/value/weights:0'])
         value += self.vars['model/value/biases:0']
 
-        # adv = np.matmul(state, self.vars['model/adv_hid/weights:0'])
-        # adv += self.vars['model/adv_hid/biases:0']
-        # adv = BatchNorm(adv, self.vars, 'model/adv_hid/BatchNorm')
-        # adv = ReLu(adv)
         adv = np.matmul(state, self.vars['model/advantage/weights:0'])
         adv += self.vars['model/advantage/biases:0']
 
@@ -208,10 +200,10 @@ class DefaultPolicy(object):
         #     < mes.max_hp * 0.1):
         #     return 0 # FLEE_IN_TERROR
         if mes.fireball_projected_damage > 0 and (
-            (mes.mana > 0.9 * mes.max_mana) or (
-             mes.fireball_projected_damage >= mes.fireball * 2)):
+                (mes.mana > 0.9 * mes.max_mana) or (
+                    mes.fireball_projected_damage >= mes.fireball * 2)):
              return 2 # FIREBALL
-        if (mes.hp - mes.aggro - mes.expected_overtime_damage < mes.max_hp * 0.5):
+        if mes.hp - mes.aggro - mes.expected_overtime_damage < mes.max_hp * 0.5:
             return 1 # FLEE
         if mes.lane not in GetLanes(me):
             return 3 # ADVANCE
@@ -383,6 +375,7 @@ class MyStrategy:
         state = None
         state = State.WorldState(me, world, game, self.lane, self.last_state, self.debug)
         state.last_flee_target = self.flee_action.GetFleeTarget(me)
+        state.last_advance_target = self.advance_action.GetAdvanceTarget(me)
         noop = Actions.NoOpAction()
 
         targets = [enemy.unit for enemy in state.enemy_states

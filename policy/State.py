@@ -1,3 +1,4 @@
+import collections
 import itertools
 import math
 
@@ -38,6 +39,13 @@ from Colors import BLACK
 from Colors import GREEN
 
 MACRO_EPSILON=1.0
+GRAPH_REBUILD_FREQUENCY=30
+
+
+class LUType:
+    WIZARD = 0
+    MINION = 1
+    BUILDING = 2
 
 # Ideas for features
 # Exp for hit
@@ -131,7 +139,7 @@ class ProjectileState(State):
             return
         if p.id < 0:
             need_to_subtract = False
-            
+
         if self.p.type == ProjectileType.FIREBALL:
             self.expected_speed = self.game.fireball_speed
             self.min_damage = owner.get_effective_damage_by_me(
@@ -257,6 +265,10 @@ class LivingUnitState(State):
         return nominal_damage
 
     @property
+    def type(self):
+        return -1
+
+    @property
     def hp(self):
         return self.unit.life
 
@@ -308,7 +320,7 @@ class LivingUnitState(State):
     @property
     def attack_range(self):
         return 0.
-    
+
     @property
     def aggro_range(self):
         return 0.
@@ -336,7 +348,7 @@ class LivingUnitState(State):
     def neutral(self):
         """1. if neutral unit, else 0."""
         return 1. if self.unit.faction > Faction.RENEGADES else 0.
-    
+
     @property
     def is_on_top_lane(self):
         return 1. if LaneType.TOP in GetLanes(self.unit) else 0.
@@ -364,19 +376,19 @@ class LivingUnitState(State):
     @property
     def fireball(self):
         return 0.0
-        
+
     @property
     def fireball_cooldown(self):
         return 0.0
-        
+
     @property
     def missile(self):
         return 0.0
-        
+
     @property
     def missile_cooldown(self):
         return 0.0
-    
+
     @property
     def staff(self):
         return 0.0
@@ -392,6 +404,18 @@ class LivingUnitState(State):
     @property
     def strafe_speed(self):
         return 0.0
+
+    @property
+    def damage(self):
+        return self.unit.damage
+
+    @property
+    def damage_per_tick(self):
+        return self.damage / self.total_cooldown_ticks
+
+    @property
+    def predictions(self):
+        pass
 
     def _to_numpy_internal(self):
         return np.array([
@@ -442,7 +466,7 @@ class WizardState(LivingUnitState):
             self.add_fake_projectile(ActionType.FROST_BOLT, me, world, game)
         if w.faction != me.faction and self.missile_cooldown == 0:
             self.add_fake_projectile(ActionType.MAGIC_MISSILE, me, world, game)
-            
+
     def add_fake_projectile(self, action, me, world, game):
         da = self.unit.get_angle_to_unit(me)
         speed = Point.FromUnit(self.unit) - Point.FromUnit(me)
@@ -523,7 +547,7 @@ class WizardState(LivingUnitState):
             self.s_damage_increase += game.staff_damage_bonus_per_skill_level
         if s_damage_aura2:
             self.s_damage_increase += game.staff_damage_bonus_per_skill_level
-        
+
         self.absorption = 0.0
         self.absorption_factor = 0.0
         if StatusType.SHIELDED in [st.type for st in w.statuses]:
@@ -536,13 +560,13 @@ class WizardState(LivingUnitState):
             self.absorption += game.magical_damage_absorption_per_skill_level
         if shield_aura2:
             self.absorption += game.magical_damage_absorption_per_skill_level
-    
+
     def get_effective_damage_to_me(self, nominal_damage):
         return max(0.0, nominal_damage * (1.0 - self.absorption_factor) - self.absorption)
 
     def get_effective_damage_by_me(self, nominal_damage):
         return (nominal_damage + self.m_damage_increase) * self.damage_factor
-    
+
     def remaining_action_cooldown(self, action):
         if action == ActionType.MAGIC_MISSILE:
             return self.missile_cooldown
@@ -551,6 +575,10 @@ class WizardState(LivingUnitState):
         if action == ActionType.FROST_BOLT:
             return self.frost_bolt_cooldown
         return self.staff_cooldown
+
+    @property
+    def type(self):
+        return LUType.WIZARD
 
     @property
     def mana(self):
@@ -574,7 +602,7 @@ class WizardState(LivingUnitState):
     @property
     def attack_range(self):
         return self.effective_range
-    
+
     @property
     def aggro_range(self):
         return self.effective_range
@@ -588,7 +616,7 @@ class WizardState(LivingUnitState):
     @property
     def damage(self):
         return max(self.fireball, self.frost_bolt, self.missile)
-        
+
     @property
     def staff_cooldown(self):
         return self.unit.remaining_action_cooldown_ticks
@@ -604,13 +632,13 @@ class WizardState(LivingUnitState):
     @property
     def missile_total_cooldown(self):
         return self.cached_missile_total_cooldown
-        
+
     @property
     def total_cooldown_ticks(self):
         """Ticks between attacks"""
         return max(self.game.wizard_action_cooldown_ticks, 
                    self.missile_total_cooldown)
-    
+
     @property
     def cooldown_ticks(self):
         """Ticks until next attack"""
@@ -685,20 +713,16 @@ class BuildingState(LivingUnitState):
         super(BuildingState, self).__init__(b, me, game, world, dbg)
 
     @property
+    def type(self):
+        return LUType.BUILDING
+
+    @property
     def attack_range(self):
         return self.unit.attack_range
 
     @property
     def aggro_range(self):
         return self.unit.attack_range
-
-    @property
-    def damage(self):
-        return self.unit.damage
-
-    @property
-    def damage(self):
-        return self.unit.damage
 
     @property
     def cooldown_ticks(self):
@@ -724,6 +748,10 @@ class MinionState(LivingUnitState):
                 Closest(m, global_state.minion_targets[m.faction]))
 
     @property
+    def type(self):
+        return LUType.MINION
+
+    @property
     def attack_range(self):
         return self.cached_attack_range
 
@@ -734,10 +762,6 @@ class MinionState(LivingUnitState):
     @property
     def max_speed(self):
         return self.game.minion_speed
-
-    @property
-    def damage(self):
-        return self.unit.damage
 
     @property
     def cooldown_ticks(self):
@@ -786,16 +810,16 @@ class MyState(WizardState):
             self.speed[0], self.speed[1],
             self.max_speed, self.angle,
             self.attack_range / 1000., self.vision_range / 1000.,
-            self.cooldown_ticks / 100.,  # 19
+            self.cooldown_ticks / 100.,
             self.is_on_top_lane, self.is_on_middle_lane, self.is_on_bottom_lane,
             self.total_cooldown_ticks / 100., self.aggro_range / 100.,
             self.expected_overtime_damage / 10.,
             self.frost_bolt / 10., self.frost_bolt_cooldown / 10.,
             self.fireball / 10., self.fireball_cooldown / 10.,
             self.missile / 10., self.missile_cooldown / 10.,
-            self.staff, self.hp_regen, self.forward_speed, self.strafe_speed,
+            self.staff, self.hp_regen, self.forward_speed, self.strafse_speed,
             self.aggro / 10., self.current_lane, self.max_fireball_damage
-        ])
+        ])  # Size is 32
 
 MAX_ENEMIES = 20
 MAX_FRIENDS = 20
@@ -813,7 +837,67 @@ def clean_world(me, world):
             new_p.append(p)
     world.projectiles = new_p
 
+
+Prediction = collections.namedtuple(
+    'Prediction', ['time', 'hp', 'damage_caused', 'deaths_caused'])
+
+
+class AttackGraphNode(object):
+    def __init__(self, unit):
+        self.unit = unit
+        self.hp = unit.hp
+        self.regen = unit.hp_regen
+        self.dpt = 0.
+        if unit.enemy or not isinstance(unit, WizardState):
+            self.dpt = unit.damage_per_tick
+
+        self.damage_caused = collections.defaultdict(float)
+        self.deaths_caused = collections.defaultdict(float)
+
+        self.my_target = None
+
+    def SetEnemies(self, enemies):
+        self.enemies = enemies
+
+    def SelectTarget(self, enemies):
+        # TODO(vertix): Implement
+        self.my_target = None
+
+    def ModelTime(self, time):
+        pass
+
+    def LivingTime(self, damage_per_tick):
+        if damage_per_tick > self.regen:
+            return int(math.ceil(self.hp / (damage_per_tick - self.regen)))
+        else:
+            return 20000
+
+
 class WorldState(State):
+    def ModelEngagment(self):
+        # All enemies in 1000 radius
+        friends = {u: AttackGraphNode(u) for u in self.friend_states
+                   if u.unit.get_distance_to_unit(u.unit.me) < 1000.}
+        enemies = {u: AttackGraphNode(u) for u in self.enemy_states
+                   if u.unit.get_distance_to_unit(u.unit.me) < 1000.}
+
+        friends_attackers = collections.defaultdict(list)
+        for e in enemies.itervalues():
+            friends_attackers[e.SelectTarget(friends)].append(e)
+
+        enemies_attackers = collections.defaultdict(list)
+        for f in friends.itervalues():
+            enemies_attackers[f.SelectTarget(enemies)].append(f)
+
+        time, dead = 20000, []
+        for node, atts in itertools.chain(friends_attackers, enemies_attackers):
+            lv_time = node.LivingTime(sum(a.dpt for a in atts))
+            if lv_time < time:
+                time = lv_time
+                dead = [node]
+            elif lv_time == time:
+                dead.append(node)
+
     def __init__(self, me, world, game, lane, last_state, dbg):
         super(WorldState, self).__init__(None, me, dbg)
         self.my_state = None
@@ -824,12 +908,16 @@ class WorldState(State):
             self.last_seen = last_state.last_seen
             last_state.last_seen = None
             self.last_flee_target = last_state.last_flee_target
+            self.last_advance_target = last_state.last_advance_target
             self.cached_my_state = last_state.my_state
+            self.graph = last_state.graph
         else:
             self.enemy_base_hp = 1000
             self.last_seen = {}
             self.last_flee_target = None
+            self.last_advance_target = None
             self.cached_my_state = None
+            self.graph = None
 
         self.world = world
         clean_world(me, world)
@@ -846,13 +934,14 @@ class WorldState(State):
                 ws = WizardState(w, me, game, world, dbg)
                 states.append(ws)
                 self.index[w.id] = ws
-        self.projectile_states = [ProjectileState(p, me, game, world, self, dbg) for p in world.projectiles]
+        self.projectile_states = [ProjectileState(p, me, game, world, self, dbg)
+                                  for p in world.projectiles]
 
         for s in ([MinionState(m, me, game, world, self) for m in world.minions] +
                   [BuildingState(b, me, game, world, dbg) for b in world.buildings]):
             states.append(s)
             self.index[s.unit.id] = s
-        # TODO(vertix): Add to state
+
         for b in world.buildings:
             if b.type == BuildingType.FACTION_BASE and b.faction != me.faction:
                 self.enemy_base_hp = b.life
@@ -866,21 +955,20 @@ class WorldState(State):
 
         self.my_state = MyState(me, game, world, lane, self)
 
-        self.enemy_states = [s for s in states if s.enemy][:MAX_ENEMIES]
-        # for s in self.enemy_states:
-        #     assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
-        self.friend_states = [s for s in states if not s.enemy][:MAX_FRIENDS]
-        # for s in self.friend_states:
-        #     assert len(s.to_numpy()) == LIVING_UNIT_STATE_SIZE, s
+        self.enemy_states = [s for s in states if s.enemy and s.dist < 1000][:MAX_ENEMIES]
+        self.friend_states = [s for s in states if not s.enemy and s.dist < 1000][:MAX_FRIENDS]
         
-        if world.tick_index % GRAPH_REBUILD_FREQUENCY == 0:
-            BuildPaths(self)
+        if ((self.graph is None or 
+             (world.tick_index % GRAPH_REBUILD_FREQUENCY == 0)) and 
+            self.last_advance_target is not None):
+            self.graph = BuildPaths(self, [self.last_advance_target,
+                                           self.last_flee_target])
 
     def GetMyState(self):
         if self.my_state is not None:
             return self.my_state
         return self.cached_my_state
-    
+
     @property
     def ticks_until_end(self):
         return (self.world.tick_count - self.world.tick_index)
