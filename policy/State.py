@@ -40,7 +40,7 @@ from Colors import BLACK
 from Colors import GREEN
 
 MACRO_EPSILON=1.0
-GRAPH_REBUILD_FREQUENCY=30
+GRAPH_REBUILD_FREQUENCY=50
 
 
 class LUType:
@@ -245,6 +245,11 @@ class ProjectileState(State):
 
 PROJECTILE_STATE_SIZE = 11
 
+def combine_damage_caused(damage_caused, game):
+    return ((1 + game.wizard_damage_score_factor) * damage_caused[LUType.WIZARD] +
+            (1 + game.building_damage_score_factor) * damage_caused[LUType.BUILDING] + 
+            (1 + game.minion_damage_score_factor) * damage_caused[LUType.MINION])
+
 class LivingUnitState(State):
     def __init__(self, unit, me, game, world, dbg):
         super(LivingUnitState, self).__init__(unit, me, dbg)
@@ -419,24 +424,30 @@ class LivingUnitState(State):
     def predictions(self):
         return self.preds
 
-    @property
-    def projected_living_time(self):
+    def projected_living_time(self, incoming_dpt=0.0):
+        idx = self.projected_death_pred_idx(incoming_dpt)
+        if idx >= len(self.preds):
+            return 20000.
+        return self.preds[idx].time
+        
+    def projected_damage_prevented(self, incoming_dpt=0.0):
+        idx = self.projected_death_pred_idx(incoming_dpt)
+        if idx >= len(self.preds):
+            return 0.
+        return combine_damage_caused(
+            self.preds[len(self.preds) - 1].damage_caused, self.game) - combine_damage_caused(
+                self.preds[idx].damage_caused, self.game)
+    
+    def projected_death_pred_idx(self, incoming_dpt=0.0):
         left, right = 0, len(self.preds)
         while left < right:
             mid = (left + right) / 2
-            if self.preds[mid].hp <= 0:
+            if self.preds[mid].hp - self.preds[mid].time * incoming_dpt <= 0:
                 right = mid
             else:
                 left = mid + 1
-
-        if left >= len(self.preds):
-            return 20000.
-        return self.preds[left].time
-
-        # for p in self.preds:
-        #     if p.hp == 0:
-        #         return p.time
-        # return 20000.
+        return left
+        
 
     def SetPredictions(self, preds):
         self.preds = preds
@@ -987,7 +998,7 @@ class UnitModel(object):
             if move_time < self.living_time:
                 # print '  %s comes to %s in %d' % (self, self.target, move_time)
                 return move_time
-            elif self.living_time < 20000:
+            # elif self.living_time < 20000:
                 # print '  %s dies in %d' % (self, self.living_time)
         return self.living_time
 
@@ -1079,6 +1090,8 @@ class WorldState(State):
             self.last_advance_target = last_state.last_advance_target
             self.cached_my_state = last_state.my_state
             self.graph = last_state.graph
+            self.eng = last_state.eng
+            self.wizard_ids = last_state.wizard_ids
         else:
             self.enemy_base_hp = 1000
             self.last_seen = {}
@@ -1086,6 +1099,9 @@ class WorldState(State):
             self.last_advance_target = None
             self.cached_my_state = None
             self.graph = None
+            self.eng = None
+            self.wizard_ids = sorted([w.id for w in world.wizards if 
+                                      w.faction == me.faction and w.id != me.id])
 
         self.world = world
         clean_world(me, world)
@@ -1132,14 +1148,19 @@ class WorldState(State):
             self.graph = BuildPaths(self, [self.last_advance_target,
                                            self.last_flee_target])
 
-        if len(self.enemy_states) > 1:
-            eng = self.ModelEngagement()
-            if eng:
-                # Rewrite to bin search
-                for k, v in eng.iteritems():
-                    k.SetPredictions(v)
-                    k.dbg_text(Point.FromUnit(k.unit) - Point(50, -50),
-                               'TTL:%d' % k.projected_living_time)
+        if (len(self.enemy_states) > 1 and 
+           (self.eng is None or (world.tick_index % GRAPH_REBUILD_FREQUENCY == 0))):
+            self.eng = self.ModelEngagement()
+        if self.eng:
+            # Rewrite to bin search
+            for k, v in self.eng.iteritems():
+                k.SetPredictions(v)
+                damage_caused = (0. if len(k.preds) == 0 else 
+                                                 k.preds[len(k.preds) - 1].damage_caused)
+                # print damage_caused
+                k.dbg_text(Point.FromUnit(k.unit) - Point(50, -50),
+                           'TTL:%d\nDMG:%.0f' % (k.projected_living_time(),
+                                                 combine_damage_caused(damage_caused, game)))
 
     def ModelEngagement(self):
         res = ModelEngagement(

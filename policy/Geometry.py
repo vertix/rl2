@@ -1,3 +1,5 @@
+import random
+
 from collections import namedtuple
 from math import pi
 from math import hypot
@@ -24,13 +26,13 @@ from Colors import BLACK
 EPSILON = 1E-4
 MACRO_EPSILON = 2
 MAX_OBSTACLES = 5
-MAX_TREES = 2
+MAX_TREES = 3
 INFINITY = 1e6
 TICKS_TO_ACCOUNT_FOR = 10
 RADIUS_ALLOWANCE = 2
 HALF_LANE_WIDTH = 500
 LEFT_DIAGONAL = 4
-DISTANCE_VS_DAMAGE_FACTOR = 0.1
+DISTANCE_VS_DAMAGE_FACTOR = 0.05
 MAX_ENEMIES = 3
 
 def GetLanes(u, half_lane_width=HALF_LANE_WIDTH):
@@ -524,7 +526,8 @@ def AddEdge(points, i1, i2, d, g, state, type=Edge.SEGMENT, circle=None, target_
         if mid.GetSqDistanceTo(es.unit) < es.aggro_range * es.aggro_range:
             dpt += es.damage_per_tick
     dpd = DISTANCE_VS_DAMAGE_FACTOR + dpt / state.my_state.strafe_speed
-    state.dbg_text(mid, 'dpd:%.3f' % (dpd*1000))
+    # if random.random() < 0.2:
+    #     state.dbg_text(mid, 'd:%.3f' % ((d + GetTreeCost(points[i1], target_ids, state)) * dpd))
     g[i1].append(Edge(i2, (d + GetTreeCost(points[i1], target_ids, state)) * dpd,
                  type, circle, target_ids))
     g[i2].append(Edge(
@@ -591,10 +594,10 @@ def FindOptimalPaths(me, targets, units, state):
         if not o.soft and me.get_distance_to_unit(o) < o.radius + EPSILON:
             o.radius = max(0, me.get_distance_to_unit(o) - EPSILON)
     all_units = [me_point] + [Obstacle(PlainCircle(t, 0)) for t in targets] + all_units
-    for t in targets:
-        state.dbg_circle(PlainCircle(t, 2))
-    for u in all_units:
-        state.dbg_circle(u)
+    # for t in targets:
+    #     state.dbg_circle(PlainCircle(t, 2))
+    # for u in all_units:
+    #     state.dbg_circle(u)
     
     # points[i]: Point
     points = []
@@ -653,14 +656,14 @@ def FindOptimalPaths(me, targets, units, state):
                         graph, state, type=Edge.ARC, circle=u)
         # leave just list of point numbers
         points_per_unit[unit_index] = [k for _, __, k in p if k != -1]
-    for i, u in enumerate(all_units):
-        state.dbg_circle(u, BLUE)
-    for i, p in enumerate(points):
-        for e in graph[i]:
-            color = GREEN
-            if e.target_ids or e.type == Edge.ARC:
-                color = RED
-            state.dbg_line(points[i], points[e.v], color)
+    # for i, u in enumerate(all_units):
+    #     state.dbg_circle(u, BLUE)
+    # for i, p in enumerate(points):
+    #     for e in graph[i]:
+    #         color = GREEN
+    #         if e.target_ids or e.type == Edge.ARC:
+    #             color = RED
+    #         state.dbg_line(points[i], points[e.v], color)
             
     optimal_distances, prev = Dijkstra(graph)
     return CalculatedGraph(points, prev, optimal_distances, points_per_unit)

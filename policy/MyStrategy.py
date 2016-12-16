@@ -33,6 +33,7 @@ except ImportError:
     zmq = None
 
 MAX_TARGETS_NUM = 5
+INFINITY=1e6
 
 
 def ReLu(x):
@@ -199,17 +200,59 @@ class SmartPolicy(object):
                     mes.fireball_projected_damage >= mes.fireball * 2)):
             return 2 # FIREBALL
         # if mes.projected_living_time < 200:
-        if mes.hp - mes.aggro - mes.expected_overtime_damage < mes.max_hp * 0.5:
+        best_target = None
+        best_gain = -INFINITY
+        friends_dpt = 0
+        enemy_w_dpt = 0
+        for w in state.world.wizards:
+            if w.get_distance_to_unit(me) > 1000:
+                continue
+            if w.faction == me.faction:
+                friends_dpt += state.index[w.id].damage_per_tick
+            else:
+                enemy_dpt += state.index[w.id].damage_per_tick
+        seen_close = False
+        for i, e in enumerate(state.enemy_states[:MAX_TARGETS_NUM]):
+            if e.get_distance_to_unit(me) > 1000:
+                continue
+            seen_close = True
+            ttl = e.projected_living_time(friends_dpt)
+            if ttl > 1000:
+                continue
+            damage_factor = state.game.wizard_damage_score_factor
+            elimination_factor = state.game.wizard_elimination_score_factor
+            enemy_dpt = enemy_w_dpt
+            if e.type == LUType.BUILDING:
+                damage_factor = state.game.building_damage_score_factor
+                elimination_factor = state.game.building_elimination_score_factor
+                if e.unit.type == BuildingType.FACTION_BASE:
+                    ellimination_factor += 10.
+                enemy_dpt = 0
+            if e.type == LUType.MINION:
+                damage_factor = state.game.minion_damage_score_factor
+                elimination_factor = state.game.minion_elimination_score_factor
+                enemy_dpt = 0
+            damage_factor += 0.1
+            gain = (damage_factor * e.hp +
+                elimination_factor * e.max_hp +
+                e.projected_damage_prevented(friends_dpt) - 
+                enemy_dpt * state.game.wizard_damage_score_factor * 
+                ttl)
+            gain *= (1000 - ttl) / 1000
+            if gain > best_gain:
+                best_gain = gain
+                best_target = i
+            
+        allowed_hp = 1.
+        if best_gain > 0:
+            allowed_hp -= min(0.95, best_gain / 5000.)  
+        
+        if mes.hp - mes.aggro - mes.expected_overtime_damage < mes.max_hp * allowed_hp:
             return 1 # FLEE
-
-        if mes.lane not in GetLanes(mes.unit):
-            return 3 # ADVANCE
-        u = PickTarget(mes.unit, ActionType.MAGIC_MISSILE, state,
-                       radius=MAX_ATTACK_DISTANCE)
-        if u:
-            e_ids = [e.unit.id for e in state.enemy_states[:MAX_TARGETS_NUM]]
-            idx = e_ids.index(u.id) if u.id in e_ids else 0
-            res = 4 + idx   # ATTACK
+        if best_target is not None:
+            res = 4 + best_target   # ATTACK
+        elif seen_close:
+            res = 1 # FLEE
         else:
             res = 3 # ADVANCE
         return res

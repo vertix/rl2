@@ -7,6 +7,7 @@ from model.World import World
 from model.Unit import Unit
 from model.Message import Message
 from model.SkillType import SkillType
+from model.StatusType import StatusType
 from model.Building import Building
 from model.Projectile import Projectile
 from model.ProjectileType import ProjectileType
@@ -74,6 +75,132 @@ def GetPrevWaypoint(waypoints, me):
             return i
     return 0
 
+def LearnRange(me, move):
+    if not SkillType.RANGE_BONUS_PASSIVE_1 in me.skills:
+        move.skill_to_learn = SkillType.RANGE_BONUS_PASSIVE_1
+        return True
+    if not SkillType.RANGE_BONUS_AURA_1 in me.skills:
+        move.skill_to_learn = SkillType.RANGE_BONUS_AURA_1
+        return True
+    if not SkillType.RANGE_BONUS_PASSIVE_2 in me.skills:
+        move.skill_to_learn = SkillType.RANGE_BONUS_PASSIVE_2
+        return True
+    if not SkillType.RANGE_BONUS_AURA_2 in me.skills:
+        move.skill_to_learn = SkillType.RANGE_BONUS_AURA_2
+        return True
+    if not SkillType.ADVANCED_MAGIC_MISSILE in me.skills:
+        move.skill_to_learn = SkillType.ADVANCED_MAGIC_MISSILE
+        return True
+    return False
+
+def LearnDamage(me, move):
+    if not SkillType.MAGICAL_DAMAGE_BONUS_PASSIVE_1 in me.skills:
+        move.skill_to_learn = SkillType.MAGICAL_DAMAGE_BONUS_PASSIVE_1
+        return True
+    if not SkillType.MAGICAL_DAMAGE_BONUS_AURA_1 in me.skills:
+        move.skill_to_learn = SkillType.MAGICAL_DAMAGE_BONUS_AURA_1
+        return True
+    if not SkillType.MAGICAL_DAMAGE_BONUS_PASSIVE_2 in me.skills:
+        move.skill_to_learn = SkillType.MAGICAL_DAMAGE_BONUS_PASSIVE_2
+        return True
+    if not SkillType.MAGICAL_DAMAGE_BONUS_AURA_2 in me.skills:
+        move.skill_to_learn = SkillType.MAGICAL_DAMAGE_BONUS_AURA_2
+        return True
+    if not SkillType.FROST_BOLT in me.skills:
+        move.skill_to_learn = SkillType.FROST_BOLT
+        return True
+    return False
+
+def LearnFireball(me, move):
+    if not SkillType.STAFF_DAMAGE_BONUS_PASSIVE_1 in me.skills:
+        move.skill_to_learn = SkillType.STAFF_DAMAGE_BONUS_PASSIVE_1
+        return True
+    if not SkillType.STAFF_DAMAGE_BONUS_AURA_1 in me.skills:
+        move.skill_to_learn = SkillType.STAFF_DAMAGE_BONUS_AURA_1
+        return True
+    if not SkillType.STAFF_DAMAGE_BONUS_PASSIVE_2 in me.skills:
+        move.skill_to_learn = SkillType.STAFF_DAMAGE_BONUS_PASSIVE_2
+        return True
+    if not SkillType.STAFF_DAMAGE_BONUS_AURA_2 in me.skills:
+        move.skill_to_learn = SkillType.STAFF_DAMAGE_BONUS_AURA_2
+        return True
+    if not SkillType.FIREBALL in me.skills:
+        move.skill_to_learn = SkillType.FIREBALL
+        return True
+    return False
+
+def LearnSpeed(me, move):
+    if not SkillType.MOVEMENT_BONUS_FACTOR_PASSIVE_1 in me.skills:
+        move.skill_to_learn = SkillType.MOVEMENT_BONUS_FACTOR_PASSIVE_1
+        return True
+    if not SkillType.MOVEMENT_BONUS_FACTOR_AURA_1 in me.skills:
+        move.skill_to_learn = SkillType.MOVEMENT_BONUS_FACTOR_AURA_1
+        return True
+    if not SkillType.MOVEMENT_BONUS_FACTOR_PASSIVE_2 in me.skills:
+        move.skill_to_learn = SkillType.MOVEMENT_BONUS_FACTOR_PASSIVE_2
+        return True
+    if not SkillType.MOVEMENT_BONUS_FACTOR_AURA_2 in me.skills:
+        move.skill_to_learn = SkillType.MOVEMENT_BONUS_FACTOR_AURA_2
+        return True
+    if not SkillType.HASTE in me.skills:
+        move.skill_to_learn = SkillType.HASTE
+        return True
+    return False
+    
+def LearnShield(me, move):
+    if not SkillType.MAGICAL_DAMAGE_ABSORPTION_PASSIVE_1 in me.skills:
+        move.skill_to_learn = SkillType.MAGICAL_DAMAGE_ABSORPTION_PASSIVE_1
+        return True
+    if not SkillType.MAGICAL_DAMAGE_ABSORPTION_AURA_1 in me.skills:
+        move.skill_to_learn = SkillType.MAGICAL_DAMAGE_ABSORPTION_AURA_1
+        return True
+    if not SkillType.MAGICAL_DAMAGE_ABSORPTION_PASSIVE_2 in me.skills:
+        move.skill_to_learn = SkillType.MAGICAL_DAMAGE_ABSORPTION_PASSIVE_2
+        return True
+    if not SkillType.MAGICAL_DAMAGE_ABSORPTION_AURA_2 in me.skills:
+        move.skill_to_learn = SkillType.MAGICAL_DAMAGE_ABSORPTION_AURA_2
+        return True
+    if not SkillType.SHIELD in me.skills:
+        move.skill_to_learn = SkillType.SHIELD
+        return True
+    return False
+
+def GetSupport1SkillToLearn(w):
+    fake_move = Move()
+    if LearnFireball(w, fake_move):
+        return fake_move.skill_to_learn
+    if LearnDamage(w, fake_move):
+        return fake_move.skill_to_learn
+    if LearnRange(w, fake_move):
+        return fake_move.skill_to_learn
+    
+
+def GetSupport2SkillToLearn(w):
+    fake_move = Move()
+    if LearnShield(w, fake_move):
+        return fake_move.skill_to_learn
+    if LearnFireball(w, fake_move):
+        return fake_move.skill_to_learn
+    if LearnRange(w, fake_move):
+        return fake_move.skill_to_learn
+
+def GetSupport3SkillToLearn(w):
+    fake_move = Move()
+    if LearnRange(w, fake_move):
+        return fake_move.skill_to_learn
+    if LearnFireball(w, fake_move):
+        return fake_move.skill_to_learn
+    if LearnSpeed(w, fake_move):
+        return fake_move.skill_to_learn
+    
+def GetSupport4SkillToLearn(w):
+    fake_move = Move()
+    if LearnDamage(w, fake_move):
+        return fake_move.skill_to_learn
+    if LearnFireball(w, fake_move):
+        return fake_move.skill_to_learn
+    if LearnSpeed(w, fake_move):
+        return fake_move.skill_to_learn
 
 class MoveAction(object):
     def __init__(self, map_size, lane):
@@ -138,73 +265,31 @@ class MoveAction(object):
         state.dbg_line(me, new_p)
         state.dbg_line(me, Point(100.0, 0.0).Rotate(me.angle) + me, RED)
     
-    def MaybeSetLanes(self, me, move):
+    def MaybeSetLanes(self, me, move, state):
         if me.master:
-            move.messages = [Message(LaneType.MIDDLE, None, ''),
-                             Message(LaneType.TOP, None, ''),
-                             Message(LaneType.TOP, None, ''),
-                             Message(LaneType.BOTTOM, None, '')]
-
-    def LearnRange(self, me, move):
-        if not SkillType.RANGE_BONUS_PASSIVE_1 in me.skills:
-            move.skill_to_learn = SkillType.RANGE_BONUS_PASSIVE_1
-            return True
-        if not SkillType.RANGE_BONUS_AURA_1 in me.skills:
-            move.skill_to_learn = SkillType.RANGE_BONUS_AURA_1
-            return True
-        if not SkillType.RANGE_BONUS_PASSIVE_2 in me.skills:
-            move.skill_to_learn = SkillType.RANGE_BONUS_PASSIVE_2
-            return True
-        if not SkillType.RANGE_BONUS_AURA_2 in me.skills:
-            move.skill_to_learn = SkillType.RANGE_BONUS_AURA_2
-            return True
-        if not SkillType.ADVANCED_MAGIC_MISSILE in me.skills:
-            move.skill_to_learn = SkillType.ADVANCED_MAGIC_MISSILE
-            return True
-        return False
-
-    def LearnDamage(self, me, move):
-        if not SkillType.MAGICAL_DAMAGE_BONUS_PASSIVE_1 in me.skills:
-            move.skill_to_learn = SkillType.MAGICAL_DAMAGE_BONUS_PASSIVE_1
-            return True
-        if not SkillType.MAGICAL_DAMAGE_BONUS_AURA_1 in me.skills:
-            move.skill_to_learn = SkillType.MAGICAL_DAMAGE_BONUS_AURA_1
-            return True
-        if not SkillType.MAGICAL_DAMAGE_BONUS_PASSIVE_2 in me.skills:
-            move.skill_to_learn = SkillType.MAGICAL_DAMAGE_BONUS_PASSIVE_2
-            return True
-        if not SkillType.MAGICAL_DAMAGE_BONUS_AURA_2 in me.skills:
-            move.skill_to_learn = SkillType.MAGICAL_DAMAGE_BONUS_AURA_2
-            return True
-        if not SkillType.FROST_BOLT in me.skills:
-            move.skill_to_learn = SkillType.FROST_BOLT
-            return True
-        return False
-
-    def LearnFireball(self, me, move):
-        if not SkillType.STAFF_DAMAGE_BONUS_PASSIVE_1 in me.skills:
-            move.skill_to_learn = SkillType.STAFF_DAMAGE_BONUS_PASSIVE_1
-            return True
-        if not SkillType.STAFF_DAMAGE_BONUS_AURA_1 in me.skills:
-            move.skill_to_learn = SkillType.STAFF_DAMAGE_BONUS_AURA_1
-            return True
-        if not SkillType.STAFF_DAMAGE_BONUS_PASSIVE_2 in me.skills:
-            move.skill_to_learn = SkillType.STAFF_DAMAGE_BONUS_PASSIVE_2
-            return True
-        if not SkillType.STAFF_DAMAGE_BONUS_AURA_2 in me.skills:
-            move.skill_to_learn = SkillType.STAFF_DAMAGE_BONUS_AURA_2
-            return True
-        if not SkillType.FIREBALL in me.skills:
-            move.skill_to_learn = SkillType.FIREBALL
-            return True
-        return False
+            s1 = (GetSupport1SkillToLearn(state.index[state.wizard_ids[0]].unit) if 
+                  state.wizard_ids[0] in state.index else None)
+            s2 = (GetSupport2SkillToLearn(state.index[state.wizard_ids[1]].unit) if 
+                  state.wizard_ids[1] in state.index else None)
+            s3 = (GetSupport3SkillToLearn(state.index[state.wizard_ids[2]].unit) if 
+                  state.wizard_ids[2] in state.index else None)
+            s4 = (GetSupport4SkillToLearn(state.index[state.wizard_ids[3]].unit) if 
+                  state.wizard_ids[3] in state.index else None)
+            move.messages = [Message(LaneType.MIDDLE, s1, ''),
+                             Message(LaneType.MIDDLE, s2, ''),
+                             Message(LaneType.MIDDLE, s3, ''),
+                             Message(LaneType.MIDDLE, s4, '')]
 
     def MaybeLearnSkills(self, me, move):
-        if self.LearnFireball(me, move):
+        for message in reversed(me.messages):
+            if message.skill_to_learn is not None:
+                move.skill_to_learn = message.skill_to_learn
+                return
+        if LearnSpeed(me, move):
             return
-        if self.LearnRange(me, move):
+        if LearnShield(me, move):
             return
-        if self.LearnDamage(me, move):
+        if LearnDamage(me, move):
             return
 
     def MaybeDodge(self, move, state):
@@ -291,7 +376,44 @@ class MoveAction(object):
                 mes.missile_cooldown,
                 state.game.magic_missile_radius)
 
+    def CastUlt(self, me, move, state, skill):
+        status = StatusType.HASTENED
+        action = ActionType.HASTE
+        if skill == SkillType.SHIELD:
+            status = StatusType.SHIELDED
+            action = ActionType.SHIELD
+        best = me
+        for w in state.world.wizards:
+            if w.faction == me.faction and w.get_distance_to_unit(me) < me.cast_range:
+                if (best is None or best.id == me.id or status in best.statuses or
+                    skill in best.skills or (
+                        best.xp < w.xp and w.id != me.id and 
+                        skill not in w.skills and status not in best.statuses)):
+                    best = w
+        if best.id == me.id:
+            move.action = action
+            move.status_target_id = me.id
+            return
+        angle_to_target = me.get_angle_to_unit(best)
+        if abs(angle_to_target) < state.game.staff_sector / 2:
+            move.action = action
+            move.status_target_id = best.id
+            return
+        if not self.dodging:
+            move.turn = angle_to_target
+
     def MakeMissileMove(self, me, move, state, target=None):
+        if ((SkillType.SHIELD in me.skills) and (me.remaining_action_cooldown_ticks == 0)
+            and (me.remaining_cooldown_ticks_by_action[ActionType.SHIELD] == 0) and
+            (me.mana >= state.game.shield_manacost)):
+            self.CastUlt(me, move, state, SkillType.SHIELD)
+            return
+        if ((SkillType.HASTE in me.skills) and (me.remaining_action_cooldown_ticks == 0)
+            and (me.remaining_cooldown_ticks_by_action[ActionType.HASTE] == 0) and
+            (me.mana >= state.game.shield_manacost)):
+            self.CastUlt(me, move, state, SkillType.HASTE)
+            return
+            
         mes = state.index[me.id]
         action, cooldown, radius = self.PickActionAndCooldown(me, target, state)
         t = None
@@ -302,7 +424,7 @@ class MoveAction(object):
         
         if self.overridden_target is not None:
             if ((t is None) or
-                (me.get_distance_to_unit(self.overridden_target) < state.game.staff_range + 1)):
+                (me.get_distance_to_unit(self.overridden_target) < state.game.staff_range + me.radius)):
                 t = deepcopy(self.overridden_target)
         if t is None:
             return
@@ -381,7 +503,7 @@ class FleeInTerrorAction(MoveAction):
             if not self.dodging:
                 self.MakeAdvanceMove(me, move, state)
 
-        self.MaybeSetLanes(me, move)
+        self.MaybeSetLanes(me, move, state)
         self.MaybeLearnSkills(me, move)  
         return move
 
@@ -417,7 +539,7 @@ class FleeAction(MoveAction):
                 self.MakeAdvanceMove(me, move, state)
 
         self.MakeMissileMove(me, move, state, target)
-        self.MaybeSetLanes(me, move)
+        self.MaybeSetLanes(me, move, state)
         self.MaybeLearnSkills(me, move)  
         return move
 
@@ -436,7 +558,7 @@ class AdvanceAction(MoveAction):
         if not self.dodging:
             self.MakeAdvanceMove(me, move, state)
         self.MakeMissileMove(me, move, state)
-        self.MaybeSetLanes(me, move)        
+        self.MaybeSetLanes(me, move, state)        
         self.MaybeLearnSkills(me, move)  
         return move
 
@@ -462,7 +584,7 @@ class RangedAttack(MoveAction):
             if not self.dodging:
                 self.MakeFleeMove(me, move, state)
         self.MakeMissileMove(me, move, state, self.target)
-        self.MaybeSetLanes(me, move)
+        self.MaybeSetLanes(me, move, state)
         self.MaybeLearnSkills(me, move)
         return move
 
@@ -500,7 +622,7 @@ class FireballAction(MoveAction):
                                  world=state.world, state=state, dbg=state.dbg)
             if ps.end.GetSqDistanceTo(me) < t.GetSqDistanceTo(me) - EPSILON:
                 move.action = ActionType.MAGIC_MISSILE
-        self.MaybeSetLanes(me, move)      
+        self.MaybeSetLanes(me, move, state)      
         self.MaybeLearnSkills(me, move)  
         return move
 
@@ -537,6 +659,6 @@ class MeleeAttack(MoveAction):
                 if not self.dodging:
                     self.RushToTarget(me, closest_target, move, state)
         self.MakeMissileMove(me, move, state, self.target)
-        self.MaybeSetLanes(me, move)      
+        self.MaybeSetLanes(me, move, state)      
         self.MaybeLearnSkills(me, move)  
         return move
