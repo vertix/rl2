@@ -411,7 +411,7 @@ class LivingUnitState(State):
 
     @property
     def damage_per_tick(self):
-        return self.damage / self.total_cooldown_ticks
+        return float(self.damage) / self.total_cooldown_ticks
 
     @property
     def predictions(self):
@@ -838,69 +838,213 @@ def clean_world(me, world):
     world.projectiles = new_p
 
 
-Prediction = collections.namedtuple(
-    'Prediction', ['time', 'hp', 'damage_caused', 'deaths_caused'])
+UnitPrediction = collections.namedtuple(
+    'UnitPrediction', ['time', 'hp', 'pos', 'damage_caused', 'deaths_caused'])
 
 
-class AttackGraphNode(object):
-    def __init__(self, unit):
-        self.unit = unit
-        self.hp = unit.hp
-        self.regen = unit.hp_regen
+class UnitModel(object):
+    def __init__(self, unit_state):
+        self.unit_state = unit_state
+        self.position = Point.FromUnit(unit_state.unit)
+        self.hp = unit_state.hp
         self.dpt = 0.
-        if unit.enemy or not isinstance(unit, WizardState):
-            self.dpt = unit.damage_per_tick
+        self.speed = 0.
+        if unit_state.enemy or unit_state.type != LUType.WIZARD:
+            self.dpt = unit_state.damage_per_tick
+            self.speed = unit_state.max_speed
 
+        self.start_hp = unit_state.hp
         self.damage_caused = collections.defaultdict(float)
         self.deaths_caused = collections.defaultdict(float)
 
-        self.my_target = None
+        self.target = None
+        self.target_position = None
+        # Maps attacker into damage inflicted
+        self.attackers = collections.defaultdict(float)
+        self.current_attackers = set()
+        self.next_attackers = set()
+
+    def __str__(self):
+        return '[%s%s, hp=%.1f, (%d, %d)]' % (
+            ['Wz', 'Mn', 'Bd'][self.unit_state.type],
+            '+-'[int(self.unit_state.enemy)],
+            self.hp,
+            self.position.x,
+            self.position.y,
+            # self.unit_state.rel_position[0],
+            # self.unit_state.rel_position[1]
+            )
+
+    def __repr__(self):
+        return str(self)
+
+    @property
+    def is_corpse(self):
+        return self.hp <= 0.
+
+    def Distance(self, model):
+        return model.position.GetDistanceTo(self.position)
+
+    @property
+    def distance_to_target(self):
+        return self.position.GetDistanceTo(self.target.position)
 
     def SetEnemies(self, enemies):
         self.enemies = enemies
 
-    def SelectTarget(self, enemies):
-        # TODO(vertix): Implement
-        self.my_target = None
+    def SelectTarget(self):
+        # TODO(vertix): Implement right logic. Now we just select the closest.
+        if not self.enemies:
+            self.target = None
+            return
 
-    def ModelTime(self, time):
-        pass
+        new_target = min(self.enemies, key=lambda u: self.Distance(u))
+        if new_target != self.target and self.target:
+            self.target.current_attackers.remove(self)
 
-    def LivingTime(self, damage_per_tick):
-        if damage_per_tick > self.regen:
-            return int(math.ceil(self.hp / (damage_per_tick - self.regen)))
+        self.target = new_target
+
+        if self.Distance(self.target) <= self.unit_state.attack_range:
+            print '  %s attacks %s' % (self, self.target)
+            self.target.current_attackers.add(self)
+            # self.target.next_attackers.add(self)
+
+    def ModelTimePeriod(self, time):
+        # TODO(vertix): We should model the movement of attackers when I move!
+        if self.distance_to_target > self.unit_state.attack_range:
+            vec = self.target.position - self.position
+            self.position += vec * (time * self.speed / vec.Norm())
+            if self.distance_to_target < self.unit_state.attack_range:
+                self.target.next_attackers.add(self)   # Now we are ready to attack.
+                # self.target.next_attackers[self] = 0.   # Now we are ready to attack.
+
+        # Now we model attack on this unit.
+        for a in self.current_attackers:
+            print "# %s damages %s for %d" % (a, self, time)
+
+            dmg = time * a.dpt
+            # print '-- Inferred damage %.1f' % dmg
+            a.damage_caused[self.unit_state.type] += dmg
+            self.attackers[a] += dmg
+            self.hp -= dmg
+        self.hp = max(0., min(self.unit_state.max_hp, self.hp + time * self.unit_state.hp_regen))
+
+        if self.hp <= 0:
+            tot_dmg = sum(self.attackers.itervalues())
+            # Record my death to my attackers
+            for a, dmg in self.attackers.iteritems():
+                a.deaths_caused[self.unit_state.type] += dmg / tot_dmg
+
+    def UpdateAttackers(self):
+        if self.hp <= 0:
+            # Stop attacking
+            self.target.current_attackers.remove(self)
+        return
+
+    def NextEvent(self):
+        """Ticks until the next interesting event"""
+        dist_to_attack = self.Distance(self.target) - self.unit_state.attack_range
+        if dist_to_attack > 0 and self.speed > 0:
+            move_time = int(math.ceil(dist_to_attack / self.speed))
+            if move_time < self.living_time:
+                print '  %s comes to %s in %d' % (self, self.target, move_time)
+                return move_time
+            elif self.living_time < 20000:
+                print '  %s dies in %d' % (self, self.living_time)
+        return self.living_time
+
+    @property
+    def living_time(self):
+        """How much time left before the death :)"""
+        # TODO(vertix): This can be optmized by caching this sum
+        dpt = sum([a.dpt for a in self.current_attackers]) - self.unit_state.hp_regen
+        if dpt > 0:
+            return int(math.ceil(self.hp / dpt))
         else:
-            return 20000
+            return 20000.
+
+def ModelEngagement(friends, enemies):
+    if not enemies:
+        return
+
+    friends = set(UnitModel(u) for u in friends)
+    enemies = set(UnitModel(u) for u in enemies)
+
+    events = collections.defaultdict(list)
+    ts = 0
+
+    for f in friends:
+        f.SetEnemies(enemies)
+
+    for e in enemies:
+        e.SetEnemies(friends)
+
+    corpses_storage = []
+
+    while len(friends) > 0 and len(enemies) > 0:
+        for u in itertools.chain(friends, enemies):
+            u.SelectTarget()
+
+        # TODO(vertix): Use min-heap here?
+        u, dt = min(((u, u.NextEvent()) for u in itertools.chain(friends, enemies)),
+                    key=lambda (_, b): b)
+        if dt > 15000:  # Too long
+            break
+
+        print '->%s : %d' % (u, dt)
+
+        for u in itertools.chain(friends, enemies):
+            u.ModelTimePeriod(dt)
+        for u in itertools.chain(friends, enemies):
+            u.UpdateAttackers()
+        ts += dt
+
+        corpses = []
+        for u in itertools.chain(friends, enemies):
+            events[u.unit_state].append(
+                UnitPrediction(ts, u.hp, u.position,
+                               u.damage_caused.copy(),
+                               u.deaths_caused.copy()))
+            if u.is_corpse:
+                corpses.append(u)
+
+        for c in corpses:
+            # for a in corpse.attackers:
+            #     a.SelectTarget()
+            if c in friends: friends.remove(c)
+            if c in enemies: enemies.remove(c)
+
+        corpses_storage.extend(corpses)
+
+    for c in corpses_storage:
+        if events[c.unit_state][-1].time != ts:
+            events[c.unit_state].append(
+                UnitPrediction(ts, c.hp, c.position,
+                               c.damage_caused.copy(),
+                               c.deaths_caused.copy()))
+
+    print 'Finally:'
+    for f in friends:
+        print f
+    for e in enemies:
+        print e
+
+    return events
 
 
 class WorldState(State):
-    def ModelEngagment(self):
-        # All enemies in 1000 radius
-        friends = {u: AttackGraphNode(u) for u in self.friend_states
-                   if u.unit.get_distance_to_unit(u.unit.me) < 1000.}
-        enemies = {u: AttackGraphNode(u) for u in self.enemy_states
-                   if u.unit.get_distance_to_unit(u.unit.me) < 1000.}
+    def ModelEngagement(self):
+        print ModelEngagement(
+            [f for f in self.friend_states
+             if f.get_distance_to_unit(f.me) < 1000.],
+            [e for e in self.enemy_states
+             if e.get_distance_to_unit(e.me) < 1000.])
 
-        friends_attackers = collections.defaultdict(list)
-        for e in enemies.itervalues():
-            friends_attackers[e.SelectTarget(friends)].append(e)
-
-        enemies_attackers = collections.defaultdict(list)
-        for f in friends.itervalues():
-            enemies_attackers[f.SelectTarget(enemies)].append(f)
-
-        time, dead = 20000, []
-        for node, atts in itertools.chain(friends_attackers, enemies_attackers):
-            lv_time = node.LivingTime(sum(a.dpt for a in atts))
-            if lv_time < time:
-                time = lv_time
-                dead = [node]
-            elif lv_time == time:
-                dead.append(node)
 
     def __init__(self, me, world, game, lane, last_state, dbg):
         super(WorldState, self).__init__(None, me, dbg)
         self.my_state = None
+        self.events = []
         if last_state is not None:
             last_state.last_state = None
             self.last_state = last_state
@@ -964,6 +1108,9 @@ class WorldState(State):
             self.graph = BuildPaths(self, [self.last_advance_target,
                                            self.last_flee_target])
 
+        # if len(self.enemy_states) > 1:
+        #     self.ModelEngagement()
+
     def GetMyState(self):
         if self.my_state is not None:
             return self.my_state
@@ -971,7 +1118,7 @@ class WorldState(State):
 
     @property
     def ticks_until_end(self):
-        return (self.world.tick_count - self.world.tick_index)
+        return self.world.tick_count - self.world.tick_index
 
     def _to_numpy_internal(self):
         return np.hstack([self.my_state.to_numpy()] +

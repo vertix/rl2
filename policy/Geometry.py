@@ -23,8 +23,8 @@ from Colors import BLACK
 
 EPSILON = 1E-4
 MACRO_EPSILON = 2
-MAX_OBSTACLES = 8
-MAX_TREES = 3
+MAX_OBSTACLES = 5
+MAX_TREES = 2
 INFINITY = 1e6
 TICKS_TO_ACCOUNT_FOR = 10
 RADIUS_ALLOWANCE = 2
@@ -586,10 +586,10 @@ def FindOptimalPaths(me, targets, units, state):
     #         new_o.x += o.speed_x * TICKS_TO_ACCOUNT_FOR
     #         new_o.y += o.speed_y * TICKS_TO_ACCOUNT_FOR
     #         all_units.append(new_o)
-    # for o in all_units:
-    #     o.radius = o.radius + MACRO_EPSILON
-        # if me.get_distance_to_unit(o) < o.radius + EPSILON:
-        #     o.radius = max(0, me.get_distance_to_unit(o) - EPSILON)
+    for o in all_units:
+        # o.radius = o.radius + MACRO_EPSILON
+        if not o.soft and me.get_distance_to_unit(o) < o.radius + EPSILON:
+            o.radius = max(0, me.get_distance_to_unit(o) - EPSILON)
     all_units = [me_point] + [Obstacle(PlainCircle(t, 0)) for t in targets] + all_units
     for t in targets:
         state.dbg_circle(PlainCircle(t, 2))
@@ -720,6 +720,10 @@ def BuildPaths(state, interesting_points=[]):
         if me.get_distance_to_unit(c1) > 1000:
             continue
         interesting_points.append(mep.ProjectToCircle(c1))
+        for c2 in everything[i+1:]:
+            intersections = IntersectCircles(c1, c2)
+            if intersections is not None:
+                interesting_points.extend(intersections[0])
     for p in interesting_points:
         state.dbg_circle(PlainCircle(p, 3), BLUE)
     return FindOptimalPaths(me, interesting_points, obstacles + additional_obstacles, state)

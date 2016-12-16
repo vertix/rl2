@@ -111,9 +111,17 @@ def PickBestFireballTarget(me, state):
         targets.append(t)
     candidates = []
     segments = []
+    friend_wizards = [w for w in state.world.wizards if w.faction == me.faction]
     for i, t in enumerate(targets[:MAX_TARGETS]):
         state.dbg_circle(t, RED)
         candidates.append(Point.FromUnit(t))
+        for fw in friend_wizards:
+            intersections = IntersectCircles(t, PlainCircle(
+                fw, state.game.fireball_explosion_min_damage_range + fw.radius + MACRO_EPSILON))
+            if intersections is not None:
+                p1 = intersections[0][0]
+                p2 = intersections[0][1]
+                candidates.append((p1 + p2) * 0.5)
         for j in range(i+1, len(targets[:MAX_TARGETS])):
             t2 = targets[j]
             intersections = IntersectCircles(t, t2)
@@ -131,7 +139,6 @@ def PickBestFireballTarget(me, state):
             if intersection is not None:
                 candidates.append(intersection)
     best = None
-    friend_wizards = [w for w in state.world.wizards if w.faction == me.faction]
     for t in targets:
         t.radius -= state.game.fireball_explosion_min_damage_range - MACRO_EPSILON
 
@@ -142,8 +149,8 @@ def PickBestFireballTarget(me, state):
             d = c.GetDistanceTo(me)
         state.dbg_circle(PlainCircle(c, 3), GREEN)
         if d < state.game.fireball_explosion_min_damage_range + me.radius + mes.max_speed + MACRO_EPSILON:
-            c = Point.FromUnit(me) + (c - me) * ((
-                state.game.fireball_explosion_min_damage_range + me.radius + mes.max_speed + MACRO_EPSILON) / d)
+            c = Point.FromUnit(me) + ((c - me) * ((
+                state.game.fireball_explosion_min_damage_range + me.radius + mes.max_speed + MACRO_EPSILON) / d))
             d = c.GetDistanceTo(me)
         res = TargetAndDamage(c)
         for t in targets:
