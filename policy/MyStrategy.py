@@ -191,6 +191,33 @@ class QPolicy(object):
         return res
 
 
+class SmartPolicy(object):
+    def Act(self, state):
+        mes = state.my_state
+        if mes.fireball_projected_damage > 0 and (
+                (mes.mana > 0.9 * mes.max_mana) or (
+                    mes.fireball_projected_damage >= mes.fireball * 2)):
+            return 2 # FIREBALL
+        # if mes.projected_living_time < 200:
+        if mes.hp - mes.aggro - mes.expected_overtime_damage < mes.max_hp * 0.5:
+            return 1 # FLEE
+
+        if mes.lane not in GetLanes(mes.unit):
+            return 3 # ADVANCE
+        u = PickTarget(mes.unit, ActionType.MAGIC_MISSILE, state,
+                       radius=MAX_ATTACK_DISTANCE)
+        if u:
+            e_ids = [e.unit.id for e in state.enemy_states[:MAX_TARGETS_NUM]]
+            idx = e_ids.index(u.id) if u.id in e_ids else 0
+            res = 4 + idx   # ATTACK
+        else:
+            res = 3 # ADVANCE
+        return res
+
+    def UpdateVars(self, new_vars):
+        pass
+
+
 class DefaultPolicy(object):
     def Act(self, state):
         mes = state.my_state
@@ -254,6 +281,8 @@ class MyStrategy:
             # with open('network') as f:
                 # cPickle.load(f)
             self.policy = NNPolicy(None, NUM_ACTIONS)
+        elif args and args.smart:
+            self.policy = SmartPolicy()
         else:
             self.policy = DefaultPolicy()
 
@@ -387,7 +416,7 @@ class MyStrategy:
                    [noop] * (MAX_TARGETS_NUM - len(targets)))
 
         a = self.policy.Act(state)
-        
+
         if self.args and self.args.verbose and a != self.last_action:
             print actions[a].name
 
